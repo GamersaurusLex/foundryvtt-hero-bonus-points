@@ -1,0 +1,19 @@
+{
+  "id": "hero-bonus-points",
+  "title": "Hero & Bonus Points",
+  "description": "GM-awarded Hero Points, Mythic Points, and spendable bonus dice for PF2e and SF2e.",
+  "version": "0.1.0",
+  "url": "https://github.com/GamersaurusLex/foundryvtt-hero-bonus-points",
+  "manifest": "https://github.com/GamersaurusLex/foundryvtt-hero-bonus-points/releases/latest/download/module.json",
+  "download": "https://github.com/GamersaurusLex/foundryvtt-hero-bonus-points/releases/download/v0.1.0/hero-bonus-points.zip",
+  "authors": [{ "name": "Gamersaurus Lex" }, { "name": "Jacob Heider", "role": "Bonus Die implementation" }],
+  "compatibility": { "minimum": "14.365", "verified": "14.367", "maximum": "14" },
+  "esmodules": ["scripts/hero-bonus-points.js"],
+  "styles": ["styles/hero-bonus-points.css"],
+  "relationships": {
+    "systems": [
+      { "id": "pf2e", "type": "system", "manifest": "https://github.com/foundryvtt/pf2e/releases/latest/download/system.json", "compatibility": { "minimum": "8.3.0" } },
+      { "id": "sf2e", "type": "system", "manifest": "https://raw.githubusercontent.com/foundryvtt/pf2e/v14-dev/system.sf2e.json", "compatibility": { "minimum": "1.5.1" } }
+    ]
+  }
+}

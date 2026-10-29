@@ -1,0 +1,15 @@
+.hero-bonus-panel { padding: 0.85rem; color: var(--color-text-primary); }
+.award-header { display: flex; gap: 1rem; align-items: start; justify-content: space-between; border-bottom: 1px solid var(--color-border-light-primary); padding-bottom: .75rem; }
+.award-header h2 { margin: 0; }
+.award-header p, .award-hint { margin: .3rem 0 0; color: var(--color-text-secondary); }
+.award-actions { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: end; }
+.award-grid { display: grid; gap: .3rem; margin-top: 1rem; }
+.award-row { display: grid; grid-template-columns: 2rem minmax(10rem, 1.5fr) 6rem 6.5rem 8rem 10rem; align-items: center; gap: .45rem; padding: .4rem; background: color-mix(in srgb, var(--color-cool-5) 10%, transparent); border-radius: 4px; }
+.award-labels { background: transparent; font-weight: bold; font-size: .85em; }
+.award-row input[type="number"] { width: 4.2rem; }
+.actor-name { display: flex; align-items: center; gap: .45rem; min-width: 0; font-weight: bold; }
+.actor-name img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; }
+.mythic-control { display: flex; gap: .35rem; align-items: center; }
+.mythic-control button { width: 1.8rem; padding: .1rem; }
+.award-row select { width: 4.2rem; }
+@media (max-width: 760px) { .award-header { display:block; } .award-actions { justify-content:start; margin-top:.75rem; } .award-row { grid-template-columns: 1.7rem minmax(7rem, 1fr) 5.5rem 5.5rem; } .award-row > :nth-child(5), .award-row > :nth-child(6), .award-labels > :nth-child(5), .award-labels > :nth-child(6) { grid-column: span 2; } }

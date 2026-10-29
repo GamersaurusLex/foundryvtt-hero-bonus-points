@@ -1,0 +1,46 @@
+<section class="hero-bonus-panel">
+  <header class="award-header">
+    <div>
+      <h2>Hero &amp; Bonus Points</h2>
+      <p>Opening awards set Hero Points. Break awards add one, capped at 3. Mythic Points retain each character’s system-defined cap.</p>
+    </div>
+    <div class="award-actions">
+      <button type="button" data-action="fill-opening" data-value="1"><i class="fa-solid fa-sun"></i> Fill Selected: 1 Hero Point</button>
+      <button type="button" data-action="apply-opening"><i class="fa-solid fa-flag-checkered"></i> Set Opening Hero Points</button>
+      <button type="button" data-action="award-break"><i class="fa-solid fa-mug-hot"></i> Award Break Hero Point</button>
+    </div>
+  </header>
+
+  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>, then set the selected rows. Bonus dice and Mythic Points are only changed when you explicitly apply them.</p>
+
+  <div class="award-grid" role="table" aria-label="Party points">
+    <div class="award-row award-labels" role="row">
+      <span><input type="checkbox" data-action="toggle-all" checked aria-label="Select all party members"></span>
+      <span>Character</span><span>Hero Points</span><span>Opening Set</span><span>Mythic Points</span><span>Held Bonus Die</span>
+    </div>
+    {{#each actors}}
+      <div class="award-row" role="row" data-actor-id="{{id}}">
+        <span><input type="checkbox" class="award-selected" checked aria-label="Select {{name}}"></span>
+        <span class="actor-name"><img src="{{img}}" alt="">{{name}}</span>
+        <span class="resource-value">{{hero.value}} / 3</span>
+        <span><input class="opening-hero" type="number" min="0" max="3" value="{{hero.value}}" aria-label="Opening Hero Points for {{name}}"></span>
+        <span>
+          {{#if mythic.enabled}}
+            <div class="mythic-control"><button type="button" data-action="change-mythic" data-actor-id="{{id}}" data-delta="-1" aria-label="Remove Mythic Point from {{name}}">−</button><strong>{{mythic.value}} / {{mythic.max}}</strong><button type="button" data-action="change-mythic" data-actor-id="{{id}}" data-delta="1" aria-label="Award Mythic Point to {{name}}">+</button></div>
+          {{else}}
+            <em>—</em>
+          {{/if}}
+        </span>
+        <span>
+          <select class="bonus-die" aria-label="Bonus die for {{name}}">
+            <option value="">—</option>
+            {{#each dieOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>d{{value}}</option>{{/each}}
+          </select>
+          <button type="button" data-action="apply-die" data-actor-id="{{id}}">Apply</button>
+        </span>
+      </div>
+    {{else}}
+      <p>No character members were found in the Party actor.</p>
+    {{/each}}
+  </div>
+</section>
