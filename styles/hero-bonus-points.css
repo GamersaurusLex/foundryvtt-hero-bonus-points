@@ -12,4 +12,6 @@
 .mythic-control { display: flex; gap: .35rem; align-items: center; }
 .mythic-control button { width: 1.8rem; padding: .1rem; }
 .award-row select { width: 4.2rem; }
+.hero-bonus-die-readout { display: inline-flex; align-items: center; margin-left: .65rem; }
+.hero-bonus-die-badge { align-items: center; background: var(--color-cool-4); border: 1px solid var(--color-cool-3); border-radius: 999px; color: var(--color-light-1); display: inline-flex; font-size: .8rem; font-weight: 700; justify-content: center; line-height: 1; min-width: 2rem; padding: .24rem .45rem; }
 @media (max-width: 760px) { .award-header { display:block; } .award-actions { justify-content:start; margin-top:.75rem; } .award-row { grid-template-columns: 1.7rem minmax(7rem, 1fr) 5.5rem 5.5rem; } .award-row > :nth-child(5), .award-row > :nth-child(6), .award-labels > :nth-child(5), .award-labels > :nth-child(6) { grid-column: span 2; } }

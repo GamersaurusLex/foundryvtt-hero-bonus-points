@@ -133,13 +133,21 @@ function injectBonusReadout(app, element) {
   if (!root) return;
   const window = root.closest(".app, .application") ?? root;
   window.querySelectorAll(".hero-bonus-die-readout").forEach((element) => element.remove());
-  const readout = document.createElement("span");
   const die = heldDie(actor);
-  readout.className = "hero-bonus-die-readout";
-  readout.textContent = die ? `Bonus Die: d${die}` : "Bonus Die: —";
-  readout.dataset.tooltip = die ? `You may add this d${die} to one eligible d20 check.` : "No bonus die held.";
+  if (!die) return;
+
   const anchor = root.querySelector('[data-resource="hero-points"]');
-  (anchor ?? root.querySelector(".sheet-header") ?? root).insertAdjacentElement(anchor ? "afterend" : "afterbegin", readout);
+  if (!anchor) return;
+
+  const readout = document.createElement("span");
+  const badge = document.createElement("span");
+  readout.className = "hero-bonus-die-readout";
+  badge.className = "hero-bonus-die-badge";
+  badge.textContent = `d${die}`;
+  badge.dataset.tooltip = `Bonus d${die}. Add it to an eligible d20 roll.`;
+  badge.setAttribute("aria-label", `Bonus d${die}`);
+  readout.append(badge);
+  anchor.insertAdjacentElement("afterend", readout);
 }
 
 function actorFromMessage(message) {

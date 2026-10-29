@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Replaces the hard-to-read die glyph in PF2e character-sheet headers with a compact `dX` badge and tooltip.
+
 ## 0.1.0
 
 - Initial release of the GM award panel for session Hero Points, Mythic Points, and held bonus dice.

@@ -27,3 +27,10 @@ test("bonus die uses a guarded PF2e card-rebuild compatibility path", async () =
   assert.match(source, /could not fold bonus die into check/);
   assert.match(source, /"flags\.pf2e\.modifiers": modifiers/);
 });
+
+test("held bonus dice use a compact, legible badge beside Hero Points", async () => {
+  const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
+  assert.match(source, /badge\.textContent = `d\$\{die\}`/);
+  assert.match(source, /Bonus d\$\{die\}\. Add it to an eligible d20 roll\./);
+  assert.match(source, /anchor\.insertAdjacentElement\("afterend", readout\)/);
+});
