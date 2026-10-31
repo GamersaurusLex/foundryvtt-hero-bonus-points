@@ -32,10 +32,9 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     actions: {
       "toggle-all": AwardPanel.#toggleAll,
       "fill-opening": AwardPanel.#fillOpening,
-      "apply-opening": AwardPanel.#applyOpening,
+      "apply-awards": AwardPanel.#applyAwards,
       "award-break": AwardPanel.#awardBreak,
-      "change-mythic": AwardPanel.#changeMythic,
-      "apply-die": AwardPanel.#applyDie
+      "change-mythic": AwardPanel.#changeMythic
     }
   };
 
@@ -52,7 +51,11 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
         name: actor.name,
         img: actor.img,
         bonusDie: heldDie(actor),
-        dieOptions: DIE_SIZES.map((value) => ({ value, selected: value === heldDie(actor) })),
+        dieOptions: [
+          { value: "", label: "No change", selected: !heldDie(actor) },
+          { value: "clear", label: "Clear", selected: false },
+          ...DIE_SIZES.map((value) => ({ value, label: `d${value}`, selected: value === heldDie(actor) }))
+        ],
         hero: { value: clamp(Number(hero.value) || 0, 0, 3) },
         mythic: { enabled: !!mythic, value: mythic?.value ?? 0, max: mythic?.max ?? 0 }
       };
@@ -74,15 +77,39 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     this.selectedRows().forEach((row) => { row.querySelector(".opening-hero").value = value; });
   }
 
-  static async #applyOpening() {
+  static async #applyAwards() {
     const updates = this.selectedRows().map((row) => {
       const actor = game.actors.get(row.dataset.actorId);
-      const value = clamp(Number(row.querySelector(".opening-hero")?.value) || 0, 0, 3);
-      return actor ? { actor, value } : null;
+      const heroPoints = clamp(Number(row.querySelector(".opening-hero")?.value) || 0, 0, 3);
+      const bonusDie = row.querySelector(".bonus-die")?.value ?? "";
+      return actor ? { actor, heroPoints, bonusDie } : null;
     }).filter(Boolean);
     if (!updates.length) return ui.notifications.warn("Select at least one character.");
-    await Promise.all(updates.map(({ actor, value }) => actor.update({ "system.resources.heroPoints.value": value })));
-    await announce(`<p><strong>Session Hero Points set:</strong> ${updates.map(({ actor, value }) => `${actor.name} (${value})`).join(", ")}.</p>`);
+    const applied = await Promise.all(updates.map(async ({ actor, heroPoints, bonusDie }) => {
+      const currentHeroPoints = Number(actor.system.resources?.heroPoints?.value) || 0;
+      const currentDie = heldDie(actor);
+      const heroChanged = currentHeroPoints !== heroPoints;
+      const dieChanged = (bonusDie === "clear" && Boolean(currentDie))
+        || (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie));
+      if (heroChanged) await actor.update({ "system.resources.heroPoints.value": heroPoints });
+      if (bonusDie === "clear" && currentDie) await actor.unsetFlag(MODULE_ID, "bonusDie");
+      else if (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie)) await actor.setFlag(MODULE_ID, "bonusDie", Number(bonusDie));
+      return { actor, heroPoints, bonusDie, heroChanged, dieChanged };
+    }));
+    const changed = applied.filter((award) => award.heroChanged || award.dieChanged);
+    if (!changed.length) return ui.notifications.info("No selected awards changed.");
+    const heroSummary = applied.filter(({ heroChanged }) => heroChanged)
+      .map(({ actor, heroPoints }) => `${actor.name} (${heroPoints})`).join(", ");
+    const dieSummary = applied.filter(({ dieChanged, bonusDie }) => dieChanged && bonusDie && bonusDie !== "clear")
+      .map(({ actor, bonusDie }) => `${actor.name} (d${bonusDie})`).join(", ");
+    const cleared = applied.filter(({ dieChanged, bonusDie }) => dieChanged && bonusDie === "clear")
+      .map(({ actor }) => actor.name).join(", ");
+    const summaries = [
+      heroSummary && `Hero Points — ${heroSummary}.`,
+      dieSummary && `Bonus dice — ${dieSummary}.`,
+      cleared && `Bonus dice cleared — ${cleared}.`,
+    ].filter(Boolean);
+    await announce(`<p><strong>Session awards applied:</strong> ${summaries.join(" ")}</p>`);
     this.render({ force: true });
   }
 
@@ -114,16 +141,6 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     this.render({ force: true });
   }
 
-  static async #applyDie(event, target) {
-    const actor = game.actors.get(target.dataset.actorId);
-    const row = target.closest(".award-row");
-    const die = Number(row?.querySelector(".bonus-die")?.value) || null;
-    if (!actor) return;
-    if (die) await actor.setFlag(MODULE_ID, "bonusDie", die);
-    else await actor.unsetFlag(MODULE_ID, "bonusDie");
-    await announce(`<p><strong>Bonus Die:</strong> ${actor.name} ${die ? `receives a d${die} bonus die` : "has their bonus die cleared"}.</p>`);
-    this.render({ force: true });
-  }
 }
 
 function injectBonusReadout(app, element) {
@@ -136,7 +153,7 @@ function injectBonusReadout(app, element) {
   const die = heldDie(actor);
   if (!die) return;
 
-  const anchor = root.querySelector('[data-resource="hero-points"]');
+  const anchor = root.querySelector('[data-resource="hero-points"], [data-resource="mythic-points"]');
   if (!anchor) return;
 
   const readout = document.createElement("span");
@@ -321,9 +338,6 @@ Hooks.once("ready", () => {
 
 Hooks.on("renderActorSheetV2", injectBonusReadout);
 Hooks.on("renderActorSheet", injectBonusReadout);
-Hooks.on("updateActor", (actor, changes) => {
-  if (Object.hasOwn(changes.flags ?? {}, MODULE_ID) || Object.hasOwn(changes.flags ?? {}, `-=${MODULE_ID}`)) actor.sheet?.render({ force: false });
-});
 Hooks.on("getChatMessageContextOptions", (_application, menuItems) => {
   menuItems.push({
     name: "Add Bonus Die to Roll",

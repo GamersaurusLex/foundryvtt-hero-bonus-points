@@ -6,12 +6,12 @@
     </div>
     <div class="award-actions">
       <button type="button" data-action="fill-opening" data-value="1"><i class="fa-solid fa-sun"></i> Fill Selected: 1 Hero Point</button>
-      <button type="button" data-action="apply-opening"><i class="fa-solid fa-flag-checkered"></i> Set Opening Hero Points</button>
+      <button type="button" data-action="apply-awards"><i class="fa-solid fa-flag-checkered"></i> Apply Selected Awards</button>
       <button type="button" data-action="award-break"><i class="fa-solid fa-mug-hot"></i> Award Break Hero Point</button>
     </div>
   </header>
 
-  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>, then set the selected rows. Bonus dice and Mythic Points are only changed when you explicitly apply them.</p>
+  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>, choose any bonus dice, then apply the selected rows together. Use <strong>Clear</strong> to remove a bonus die.</p>
 
   <div class="award-grid" role="table" aria-label="Party points">
     <div class="award-row award-labels" role="row">
@@ -33,10 +33,8 @@
         </span>
         <span>
           <select class="bonus-die" aria-label="Bonus die for {{name}}">
-            <option value="">—</option>
-            {{#each dieOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>d{{value}}</option>{{/each}}
+            {{#each dieOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
           </select>
-          <button type="button" data-action="apply-die" data-actor-id="{{id}}">Apply</button>
         </span>
       </div>
     {{else}}

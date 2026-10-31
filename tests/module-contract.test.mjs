@@ -13,10 +13,12 @@ test("manifest targets Foundry V14 and both supported systems", async () => {
 
 test("award panel exposes the required GM workflows", async () => {
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
-  for (const action of ["apply-opening", "award-break", "change-mythic", "apply-die"]) {
+  for (const action of ["apply-awards", "award-break", "change-mythic"]) {
     assert.match(source, new RegExp(`"${action}"`));
   }
   assert.match(source, /Math\.min\(maximum, Math\.max\(minimum, value\)\)/);
+  assert.match(source, /bonusDie === "clear"/);
+  assert.doesNotMatch(source, /actor\.sheet\?\.render/);
 });
 
 test("bonus die uses a guarded PF2e card-rebuild compatibility path", async () => {
@@ -32,5 +34,6 @@ test("held bonus dice use a compact, legible badge beside Hero Points", async ()
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
   assert.match(source, /badge\.textContent = `d\$\{die\}`/);
   assert.match(source, /Bonus d\$\{die\}\. Add it to an eligible d20 roll\./);
+  assert.match(source, /data-resource="mythic-points"/);
   assert.match(source, /anchor\.insertAdjacentElement\("afterend", readout\)/);
 });
