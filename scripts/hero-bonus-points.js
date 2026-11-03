@@ -6,6 +6,7 @@ const CONDITION_UUIDS = {
   offGuard: "Compendium.pf2e.conditionitems.Item.AJh5ex99aV6VTggg"
 };
 const pendingInitiatives = new Map();
+const breaktimeRenderListeners = new WeakSet();
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const spending = new Set();
@@ -32,6 +33,21 @@ function mythicResource(actor) {
 
 async function announce(content) {
   await ChatMessage.create({ speaker: { alias: game.user.name }, content, whisper: [] });
+}
+
+async function awardMidGameBreakHeroPoints() {
+  const actors = partyMembers();
+  if (!actors.length) return ui.notifications.warn("No party characters were found.");
+  const awarded = [];
+  const capped = [];
+  await Promise.all(actors.map(async (actor) => {
+    const current = Number(actor.system.resources?.heroPoints?.value) || 0;
+    if (current >= 3) return capped.push(actor.name);
+    await actor.update({ "system.resources.heroPoints.value": current + 1 });
+    awarded.push(actor.name);
+  }));
+  if (awarded.length) await announce(`<p><strong>Mid-game break Hero Point award:</strong> ${awarded.join(", ")} each gain 1 Hero Point.</p>`);
+  if (capped.length) ui.notifications.info(`${capped.join(", ")} ${capped.length === 1 ? "is" : "are"} already at the 3-point cap.`);
 }
 
 function carefulConsumptionEnabled() {
@@ -78,47 +94,50 @@ function initiativeNatural(message) {
   return naturalD20(message.rolls?.[0]);
 }
 
-function criticalEffectSource(kind, combatant, messageId) {
+async function criticalConditionSource(kind, combatant, messageId) {
   const combat = combatant.parent;
   const success = kind === "success";
   const name = success ? "Critical Initiative Success" : "Critical Initiative Failure";
-  const condition = success ? CONDITION_UUIDS.quickened : CONDITION_UUIDS.offGuard;
+  const conditionUuid = success ? CONDITION_UUIDS.quickened : CONDITION_UUIDS.offGuard;
   const description = success
     ? "<p>You rolled a natural 20 on initiative. You are quickened through the end of your first turn. Use the additional action only to Step, Stride, or Strike.</p>"
     : "<p>You rolled a natural 1 on initiative. You are off-guard until the beginning of your first turn.</p>";
-  return {
-    name,
-    type: "effect",
-    img: success ? "systems/pf2e/icons/conditions/quickened.webp" : "systems/pf2e/icons/conditions/off-guard.webp",
-    system: {
-      description: { value: description, gm: "" },
-      rules: [{
-        key: "GrantItem",
-        uuid: condition,
-        flag: success ? "criticalInitiativeQuickened" : "criticalInitiativeOffGuard",
-        onDeleteActions: { granter: null, grantee: "cascade" }
-      }],
-      duration: { value: -1, unit: "unlimited", expiry: null, sustained: false },
-      start: { value: game.time.worldTime, initiative: null },
-      tokenIcon: { show: false },
-      traits: { value: [], otherTags: [] }
-    },
-    flags: {
-      [MODULE_ID]: {
-        [CRITICAL_INITIATIVE_FLAG]: {
-          combatId: combat.id,
-          combatantId: combatant.id,
-          kind,
-          messageId,
-          started: combat.combatant?.id === combatant.id
-        }
+  const nativeCondition = await fromUuid(conditionUuid);
+  if (!nativeCondition?.isOfType?.("condition")) return null;
+
+  // Clone the PF2e condition itself. A wrapper Effect with GrantItem creates a
+  // second, visible condition, whereas this remains one native condition with
+  // our explanatory name and lifecycle flag.
+  const source = nativeCondition.toObject();
+  delete source._id;
+  source.name = name;
+  source.system.description.value = description;
+  source.flags = foundry.utils.mergeObject(source.flags ?? {}, {
+    [MODULE_ID]: {
+      [CRITICAL_INITIATIVE_FLAG]: {
+        combatId: combat.id,
+        combatantId: combatant.id,
+        kind,
+        messageId,
+        started: combat.combatant?.id === combatant.id
       }
     }
-  };
+  }, { inplace: false });
+  return source;
 }
 
 function criticalInitiativeEffects(actor, combat) {
-  return actor.items.filter((item) => item.type === "effect" && item.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG)?.combatId === combat.id);
+  return actor.items.filter((item) => item.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG)?.combatId === combat.id);
+}
+
+async function removeLegacyCriticalInitiativeEffects() {
+  const removals = game.actors.contents.map(async (actor) => {
+    const ids = actor.items
+      .filter((item) => item.type === "effect" && item.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG))
+      .map((item) => item.id);
+    if (ids.length) await actor.deleteEmbeddedDocuments("Item", ids);
+  });
+  await Promise.all(removals);
 }
 
 async function applyCriticalInitiative(combatant, pending) {
@@ -131,7 +150,8 @@ async function applyCriticalInitiative(combatant, pending) {
   const hasEffect = criticalInitiativeEffects(actor, combat)
     .some((effect) => effect.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG)?.messageId === pending.messageId);
   if (hasEffect) return;
-  await actor.createEmbeddedDocuments("Item", [criticalEffectSource(kind, combatant, pending.messageId)]);
+  const source = await criticalConditionSource(kind, combatant, pending.messageId);
+  if (source) await actor.createEmbeddedDocuments("Item", [source]);
 }
 
 async function resolveCriticalInitiativeEffects(combat, changed) {
@@ -351,18 +371,7 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
   }
 
   static async #awardMidGameBreak() {
-    const actors = partyMembers();
-    if (!actors.length) return ui.notifications.warn("No party characters were found.");
-    const awarded = [];
-    const capped = [];
-    await Promise.all(actors.map(async (actor) => {
-      const current = Number(actor.system.resources?.heroPoints?.value) || 0;
-      if (current >= 3) return capped.push(actor.name);
-      await actor.update({ "system.resources.heroPoints.value": current + 1 });
-      awarded.push(actor.name);
-    }));
-    if (awarded.length) await announce(`<p><strong>Mid-game break Hero Point award:</strong> ${awarded.join(", ")} each gain 1 Hero Point.</p>`);
-    if (capped.length) ui.notifications.info(`${capped.join(", ")} ${capped.length === 1 ? "is" : "are"} already at the 3-point cap.`);
+    await awardMidGameBreakHeroPoints();
     this.render({ force: true });
   }
 
@@ -605,7 +614,7 @@ Hooks.once("init", () => {
   });
   game.settings.register(MODULE_ID, "midGameBreakHeroPoints", {
     name: "Enable Mid-Game Break Hero Point Awards",
-    hint: "Adds a deliberate panel button that awards 1 Hero Point to every party character below the 3-point cap.",
+    hint: "Adds a deliberate award button to the Break Time window and Award Panel. It awards 1 Hero Point to every party character below the 3-point cap.",
     scope: "world",
     config: true,
     type: Boolean,
@@ -621,8 +630,58 @@ Hooks.once("init", () => {
   });
 });
 
+function injectBreakTimeAwardControl(app) {
+  if (!game.user.isGM || !game.settings.get(MODULE_ID, "midGameBreakHeroPoints")) return;
+  const root = app?.element;
+  if (!(root instanceof HTMLElement) || root.querySelector(`[data-${MODULE_ID}-mid-game-break]`)) return;
+  const footer = root.querySelector(".sheet-footer");
+  if (!footer) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.setAttribute(`data-${MODULE_ID}-mid-game-break`, "true");
+  button.setAttribute("aria-label", "Award Mid-Game Hero Points");
+  button.setAttribute("data-tooltip", "Award Mid-Game Hero Points");
+  button.style.whiteSpace = "nowrap";
+  button.innerHTML = '<i class="fa-solid fa-star"></i> Award HP';
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      await awardMidGameBreakHeroPoints();
+    } finally {
+      button.disabled = false;
+    }
+  });
+  footer.prepend(button);
+}
+
+function attachBreakTimeAwardControl(app) {
+  if (!app) return;
+  if (!breaktimeRenderListeners.has(app)) {
+    app.addEventListener("render", () => injectBreakTimeAwardControl(app));
+    breaktimeRenderListeners.add(app);
+  }
+  injectBreakTimeAwardControl(app);
+}
+
+function registerBreakTimeIntegration() {
+  if (!game.modules.get("breaktime")?.active || !game.BreakTime) return;
+  attachBreakTimeAwardControl(game.BreakTime.app);
+  Hooks.on("updateSetting", (setting, changes) => {
+    if (setting.key !== "breaktime.paused" || !changes.value) return;
+    window.setTimeout(() => attachBreakTimeAwardControl(game.BreakTime.app), 100);
+  });
+  if (!globalThis.libWrapper || !game.BreakTime.showApp) return;
+  libWrapper.register(MODULE_ID, "game.BreakTime.showApp", async function (wrapped, ...args) {
+    const result = await wrapped(...args);
+    attachBreakTimeAwardControl(game.BreakTime.app);
+    return result;
+  }, "WRAPPER");
+}
+
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = { open: () => new AwardPanel().render({ force: true }) };
+  registerBreakTimeIntegration();
+  void removeLegacyCriticalInitiativeEffects();
   if (game.settings.get(MODULE_ID, "dynamicStride")) void ensureDynamicStride();
 });
 

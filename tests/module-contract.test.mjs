@@ -38,11 +38,25 @@ test("Critical Initiative uses named effects and combat turn boundaries", async 
   assert.match(source, /"Critical Initiative Failure"/);
   assert.match(source, /Compendium\.pf2e\.conditionitems\.Item\.nlCjDvLMf2EkV2dl/);
   assert.match(source, /Compendium\.pf2e\.conditionitems\.Item\.AJh5ex99aV6VTggg/);
+  assert.match(source, /async function criticalConditionSource/);
+  assert.match(source, /nativeCondition\.toObject\(\)/);
+  assert.doesNotMatch(source, /key: "GrantItem"/);
+  assert.match(source, /async function removeLegacyCriticalInitiativeEffects/);
+  assert.match(source, /item\.type === "effect" && item\.getFlag\(MODULE_ID, CRITICAL_INITIATIVE_FLAG\)/);
   assert.match(source, /Hooks\.on\("createChatMessage"/);
   assert.match(source, /Hooks\.on\("updateCombatant"/);
   assert.match(source, /Hooks\.on\("updateCombat"/);
   assert.match(source, /state\.kind === "failure" && current\?\.id === combatant\.id/);
   assert.match(source, /state\.kind === "success" && state\.started && current\?\.id !== combatant\.id/);
+});
+
+test("mid-game Hero Point awards are deliberate and available during Break Time", async () => {
+  const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
+  assert.match(source, /async function awardMidGameBreakHeroPoints/);
+  assert.match(source, /Award HP/);
+  assert.match(source, /data-tooltip", "Award Mid-Game Hero Points/);
+  assert.match(source, /game\.BreakTime\.showApp/);
+  assert.match(source, /app\.addEventListener\("render"/);
 });
 
 test("bonus die uses a guarded PF2e card-rebuild compatibility path", async () => {
