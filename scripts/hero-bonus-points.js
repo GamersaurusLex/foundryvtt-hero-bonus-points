@@ -23,6 +23,78 @@ async function announce(content) {
   await ChatMessage.create({ speaker: { alias: game.user.name }, content, whisper: [] });
 }
 
+function carefulConsumptionEnabled() {
+  return game.settings.get(MODULE_ID, "carefulConsumption");
+}
+
+function isHealingConsumable(item) {
+  const damage = item?.system?.damage;
+  return item?.isOfType?.("consumable")
+    && damage?.kind === "healing"
+    && typeof damage.formula === "string"
+    && damage.formula.trim().length > 0;
+}
+
+function damageRollClass() {
+  return CONFIG.Dice.rolls.find((RollClass) => RollClass.name === "DamageRoll") ?? Roll;
+}
+
+async function carefulHealingFormula(item, { chirurgeon = false } = {}) {
+  const formula = item.system.damage.formula;
+  const maximum = await new Roll(formula, item.actor?.getRollData?.() ?? {}).evaluate({ maximize: true });
+  const healed = chirurgeon ? `(${maximum.total} + ${formula})` : `${maximum.total}`;
+  return `${healed}[${item.system.damage.type},${item.system.damage.kind}]`;
+}
+
+async function consumeCarefully(item, { chirurgeon = false } = {}) {
+  const actor = item.actor;
+  const speaker = ChatMessage.getSpeaker({ actor });
+  const flags = { [MODULE_ID]: { origin: { sourceId: item.sourceId, uuid: item.uuid, type: item.type } } };
+  const card = document.createElement("div");
+  card.innerHTML = (await item.toMessage(null, { create: false }))?.content ?? "";
+  card.querySelector("footer")?.remove();
+  card.querySelector("button[data-action='consume']")?.remove();
+
+  const formula = await carefulHealingFormula(item, { chirurgeon });
+  const DamageRoll = damageRollClass();
+  const roll = new DamageRoll(formula);
+  await roll.toMessage({
+    speaker,
+    flavor: `<p><strong>Careful Consumption (2 actions)</strong></p>${card.innerHTML}`,
+    flags,
+  });
+
+  const uses = item.uses;
+  if (item.system.uses.autoDestroy && uses.value <= 1) {
+    const quantity = Math.max(item.quantity - 1, 0);
+    if (quantity <= 0) await item.delete();
+    else await item.update({ "system.quantity": quantity, "system.uses.value": uses.max });
+  } else {
+    await item.update({ "system.uses.value": Math.max(uses.value - 1, 0) });
+  }
+}
+
+async function promptCarefulConsumption({ cancel, item, use }) {
+  const chirurgeonEnabled = game.settings.get(MODULE_ID, "chirurgeonFieldDiscovery");
+  const choice = await foundry.applications.api.DialogV2.wait({
+    window: { title: "Careful Consumption" },
+    content: `
+      <p><strong>${item.name}</strong></p>
+      <p>Choose how to consume this healing item.</p>
+      <label class="checkbox"><input type="checkbox" name="chirurgeon" ${chirurgeonEnabled ? "" : "disabled"}> Apply Chirurgeon Greater Field Discovery</label>
+      ${chirurgeonEnabled ? "" : "<p class=\"hint\">Enable the Chirurgeon setting if a character has Greater Field Discovery.</p>"}
+    `,
+    buttons: [
+      { action: "regular", default: true, icon: "fa-solid fa-flask", label: "Regular Consumption", callback: () => "regular" },
+      { action: "careful", icon: "fa-solid fa-hand-sparkles", label: "Careful Consumption (2 actions)", callback: (_event, button) => ({ careful: true, chirurgeon: button.form.elements.chirurgeon?.checked ?? false }) },
+      { action: "cancel", icon: "fa-solid fa-xmark", label: "Cancel", callback: () => "cancel" },
+    ],
+  });
+  if (choice === "regular") return use();
+  if (choice?.careful) return consumeCarefully(item, choice);
+  return cancel();
+}
+
 class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-award-panel`,
@@ -322,6 +394,23 @@ async function spendBonusDie(message) {
 }
 
 Hooks.once("init", () => {
+  game.settings.register(MODULE_ID, "carefulConsumption", {
+    name: "Enable Careful Consumption",
+    hint: "Lets players choose Regular or Careful Consumption when using a healing consumable through PF2e Toolbelt's Use button.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+    requiresReload: true,
+  });
+  game.settings.register(MODULE_ID, "chirurgeonFieldDiscovery", {
+    name: "Campaign Has a Chirurgeon with Greater Field Discovery",
+    hint: "Adds the Greater Field Discovery option to the Careful Consumption dialog.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+  });
   game.settings.registerMenu(MODULE_ID, "awardPanel", {
     name: "Hero & Bonus Points",
     label: "Open Award Panel",
@@ -334,6 +423,12 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = { open: () => new AwardPanel().render({ force: true }) };
+});
+
+Hooks.on("pf2e-toolbelt.preUsePhysicalItem", (context) => {
+  if (!carefulConsumptionEnabled() || !isHealingConsumable(context.item)) return;
+  void promptCarefulConsumption(context);
+  return false;
 });
 
 Hooks.on("renderActorSheetV2", injectBonusReadout);

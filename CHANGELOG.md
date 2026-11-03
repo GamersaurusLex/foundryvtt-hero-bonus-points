@@ -1,5 +1,11 @@
 # Changelog
 
+## Next
+
+- Adds the Careful Consumption variant-rule hook for PF2e Toolbelt's inventory **Use** control.
+- Healing consumables now offer Regular Consumption or **Careful Consumption (2 actions)**, which posts maximum healing and expends one use.
+- Adds the optional Greater Field Discovery checkbox for campaigns with a chirurgeon.
+
 ## 0.1.2
 
 - Lets the GM set selected PCs' opening Hero Points and bonus dice together with one bulk apply action.

@@ -9,12 +9,15 @@ A Foundry VTT v14 module for PF2e and SF2e that gives the GM one native award pa
 - Adjust each character's native Mythic Points when that resource is enabled by the active system.
 - Award one held d4, d6, d8, d10, or d12 bonus die to a PC; a new award replaces an unspent die.
 - Let an eligible player right-click their PF2e check card and choose **Add Bonus Die to Roll**.
+- Optionally enable **Careful Consumption** for healing consumables used through PF2e Toolbelt's inventory **Use** button. Players choose normal healing or maximum healing at a 2-action cost. Campaigns with a chirurgeon using Greater Field Discovery can enable its additional normal-healing roll in the same dialog.
 
 For a supported PF2e check with a DC, the bonus die is folded into the original chat card and its degree of success recalculates. The die is a Fortune effect, so it cannot be combined with a Hero Point reroll on that check.
 
 ## Use
 
 Open **Game Settings → Hero & Bonus Points → Open Award Panel**. The panel is GM-only; award announcements are public. Players see a read-only held-bonus-die indicator on their character sheet.
+
+Enable **Careful Consumption** from the module settings after installing the companion Gamersaurus Lex fork of PF2e Toolbelt. The Toolbelt hook preserves its normal consumption workflow when a player selects **Regular Consumption**.
 
 ## Compatibility note
 

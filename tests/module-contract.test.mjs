@@ -37,3 +37,13 @@ test("held bonus dice use a compact, legible badge beside Hero Points", async ()
   assert.match(source, /data-resource="mythic-points"/);
   assert.match(source, /anchor\.insertAdjacentElement\("afterend", readout\)/);
 });
+
+test("Careful Consumption intercepts only Toolbelt healing-consumable uses", async () => {
+  const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
+  assert.match(source, /pf2e-toolbelt\.preUsePhysicalItem/);
+  assert.match(source, /damage\?\.kind === "healing"/);
+  assert.match(source, /Careful Consumption \(2 actions\)/);
+  assert.match(source, /evaluate\(\{ maximize: true \}\)/);
+  assert.match(source, /Regular Consumption/);
+  assert.match(source, /"system\.uses\.value": Math\.max\(uses\.value - 1, 0\)/);
+});
