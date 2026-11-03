@@ -42,7 +42,9 @@ test("Careful Consumption intercepts only Toolbelt healing-consumable uses", asy
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
   assert.match(source, /pf2e-toolbelt\.preUsePhysicalItem/);
   assert.match(source, /damage\?\.kind === "healing"/);
-  assert.match(source, /action-glyph/);
+  assert.match(source, /labelCarefulConsumption/);
+  assert.match(source, /PF2E\.ActionsNumber\.Two/);
+  assert.match(source, /label: "Careful Consumption"/);
   assert.match(source, /evaluate\(\{ maximize: true \}\)/);
   assert.match(source, /Regular Consumption/);
   assert.match(source, /"system\.uses\.value": Math\.max\(uses\.value - 1, 0\)/);

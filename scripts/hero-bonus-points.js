@@ -39,6 +39,18 @@ function damageRollClass() {
   return CONFIG.Dice.rolls.find((RollClass) => RollClass.name === "DamageRoll") ?? Roll;
 }
 
+function labelCarefulConsumption(card) {
+  const content = card.querySelector(".card-content");
+  const actionGlyph = content?.querySelector(".action-glyph");
+  if (!content || !actionGlyph) return;
+
+  content.innerHTML = content.innerHTML.replace("Activate", "Careful Consumption");
+  const twoActionGlyph = content.querySelector(".action-glyph");
+  if (!twoActionGlyph) return;
+  twoActionGlyph.textContent = "2";
+  twoActionGlyph.dataset.tooltip = "PF2E.ActionsNumber.Two";
+}
+
 async function carefulHealingFormula(item, { chirurgeon = false } = {}) {
   const formula = item.system.damage.formula;
   const maximum = await new Roll(formula, item.actor?.getRollData?.() ?? {}).evaluate({ maximize: true });
@@ -54,13 +66,14 @@ async function consumeCarefully(item, { chirurgeon = false } = {}) {
   card.innerHTML = (await item.toMessage(null, { create: false }))?.content ?? "";
   card.querySelector("footer")?.remove();
   card.querySelector("button[data-action='consume']")?.remove();
+  labelCarefulConsumption(card);
 
   const formula = await carefulHealingFormula(item, { chirurgeon });
   const DamageRoll = damageRollClass();
   const roll = new DamageRoll(formula);
   await roll.toMessage({
     speaker,
-    flavor: `<p><strong>Careful Consumption (2 actions)</strong></p>${card.innerHTML}`,
+    flavor: `<p><strong>Careful Consumption</strong></p>${card.innerHTML}`,
     flags,
   });
 
@@ -86,7 +99,7 @@ async function promptCarefulConsumption({ cancel, item, use }) {
     `,
     buttons: [
       { action: "regular", default: true, icon: "fa-solid fa-flask", label: "Regular Consumption", callback: () => "regular" },
-      { action: "careful", icon: "fa-solid fa-hand-sparkles", label: "Careful Consumption <span class=\"action-glyph\" aria-label=\"2 actions\">2</span>", callback: (_event, button) => ({ careful: true, chirurgeon: button.form.elements.chirurgeon?.checked ?? false }) },
+      { action: "careful", icon: "fa-solid fa-hand-sparkles", label: "Careful Consumption", callback: (_event, button) => ({ careful: true, chirurgeon: button.form.elements.chirurgeon?.checked ?? false }) },
       { action: "cancel", icon: "fa-solid fa-xmark", label: "Cancel", callback: () => "cancel" },
     ],
   });
