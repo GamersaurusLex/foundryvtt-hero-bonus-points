@@ -1,12 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
 
 - Renamed the module to **Lex's Variant Rules** while retaining the existing module ID for installed-world compatibility.
 - Added settings for Bonus Dice, Dynamic Stride, Critical Initiative, and deliberate Mid-Game Break Hero Point awards.
-- Adds named Critical Initiative Success and Critical Initiative Failure effects with first-turn lifecycle handling.
-
-## Next
+- Critical Initiative now applies exactly one named, native PF2e condition and removes obsolete duplicate wrapper effects from prior versions.
+- Adds the deliberate **Award HP** button to Break Time, alongside the existing Award Panel control.
 
 - Adds the Careful Consumption variant-rule hook for PF2e Toolbelt's inventory **Use** control.
 - Healing consumables now offer Regular Consumption or **Careful Consumption (2 actions)**, which posts maximum healing and expends one use.
