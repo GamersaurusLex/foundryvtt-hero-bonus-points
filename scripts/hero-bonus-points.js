@@ -86,7 +86,7 @@ async function promptCarefulConsumption({ cancel, item, use }) {
     `,
     buttons: [
       { action: "regular", default: true, icon: "fa-solid fa-flask", label: "Regular Consumption", callback: () => "regular" },
-      { action: "careful", icon: "fa-solid fa-hand-sparkles", label: "Careful Consumption (2 actions)", callback: (_event, button) => ({ careful: true, chirurgeon: button.form.elements.chirurgeon?.checked ?? false }) },
+      { action: "careful", icon: "fa-solid fa-hand-sparkles", label: "Careful Consumption <span class=\"action-glyph\" aria-label=\"2 actions\">2</span>", callback: (_event, button) => ({ careful: true, chirurgeon: button.form.elements.chirurgeon?.checked ?? false }) },
       { action: "cancel", icon: "fa-solid fa-xmark", label: "Cancel", callback: () => "cancel" },
     ],
   });
