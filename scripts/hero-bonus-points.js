@@ -1,10 +1,21 @@
 const MODULE_ID = "hero-bonus-points";
 const DIE_SIZES = [4, 6, 8, 10, 12];
+const CRITICAL_INITIATIVE_FLAG = "criticalInitiative";
+const CONDITION_UUIDS = {
+  quickened: "Compendium.pf2e.conditionitems.Item.nlCjDvLMf2EkV2dl",
+  offGuard: "Compendium.pf2e.conditionitems.Item.AJh5ex99aV6VTggg"
+};
+const pendingInitiatives = new Map();
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const spending = new Set();
 
+function bonusDiceEnabled() {
+  return game.settings.get(MODULE_ID, "bonusDice");
+}
+
 function heldDie(actor) {
+  if (!bonusDiceEnabled()) return null;
   const die = Number(actor?.getFlag(MODULE_ID, "bonusDie"));
   return DIE_SIZES.includes(die) ? die : null;
 }
@@ -25,6 +36,122 @@ async function announce(content) {
 
 function carefulConsumptionEnabled() {
   return game.settings.get(MODULE_ID, "carefulConsumption");
+}
+
+function criticalInitiativeEnabled() {
+  return game.system.id === "pf2e" && game.settings.get(MODULE_ID, "criticalInitiative");
+}
+
+function isActiveGM() {
+  return game.user.isGM && game.users.activeGM?.id === game.user.id;
+}
+
+function isDynamicStride(item) {
+  return item.type === "action" && item.name === "Dynamic Stride";
+}
+
+async function ensureDynamicStride() {
+  if (game.system.id !== "pf2e" || !isActiveGM() || game.items.some(isDynamicStride)) return;
+  await Item.create({
+    name: "Dynamic Stride",
+    type: "action",
+    img: "systems/pf2e/icons/actions/TwoActions.webp",
+    system: {
+      description: {
+        value: "<p>You move and take action along the way.</p><p>You Stride. During your Stride, you can use a basic action that takes a single action or less during your movement. If your action is interrupted for any reason, your Stride immediately ends.</p>",
+        gm: ""
+      },
+      rules: [],
+      slug: null,
+      traits: { value: [], otherTags: [] },
+      actionType: { value: "action" },
+      actions: { value: 2 },
+      category: null,
+      deathNote: false
+    }
+  }, { renderSheet: false });
+  ui.notifications.info("Dynamic Stride was added to the Items directory.");
+}
+
+function initiativeNatural(message) {
+  if (!message?.flags?.core?.initiativeRoll && message?.flags?.pf2e?.context?.type !== "initiative") return null;
+  return naturalD20(message.rolls?.[0]);
+}
+
+function criticalEffectSource(kind, combatant, messageId) {
+  const combat = combatant.parent;
+  const success = kind === "success";
+  const name = success ? "Critical Initiative Success" : "Critical Initiative Failure";
+  const condition = success ? CONDITION_UUIDS.quickened : CONDITION_UUIDS.offGuard;
+  const description = success
+    ? "<p>You rolled a natural 20 on initiative. You are quickened through the end of your first turn. Use the additional action only to Step, Stride, or Strike.</p>"
+    : "<p>You rolled a natural 1 on initiative. You are off-guard until the beginning of your first turn.</p>";
+  return {
+    name,
+    type: "effect",
+    img: success ? "systems/pf2e/icons/conditions/quickened.webp" : "systems/pf2e/icons/conditions/off-guard.webp",
+    system: {
+      description: { value: description, gm: "" },
+      rules: [{
+        key: "GrantItem",
+        uuid: condition,
+        flag: success ? "criticalInitiativeQuickened" : "criticalInitiativeOffGuard",
+        onDeleteActions: { granter: null, grantee: "cascade" }
+      }],
+      duration: { value: -1, unit: "unlimited", expiry: null, sustained: false },
+      start: { value: game.time.worldTime, initiative: null },
+      tokenIcon: { show: false },
+      traits: { value: [], otherTags: [] }
+    },
+    flags: {
+      [MODULE_ID]: {
+        [CRITICAL_INITIATIVE_FLAG]: {
+          combatId: combat.id,
+          combatantId: combatant.id,
+          kind,
+          messageId,
+          started: combat.combatant?.id === combatant.id
+        }
+      }
+    }
+  };
+}
+
+function criticalInitiativeEffects(actor, combat) {
+  return actor.items.filter((item) => item.type === "effect" && item.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG)?.combatId === combat.id);
+}
+
+async function applyCriticalInitiative(combatant, pending) {
+  if (!criticalInitiativeEnabled() || !isActiveGM() || !combatant?.actor || !pending) return;
+  const combat = combatant.parent;
+  if (!combat) return;
+  const { actor } = combatant;
+  const kind = pending.natural === 20 ? "success" : pending.natural === 1 ? "failure" : null;
+  if (!kind) return;
+  const hasEffect = criticalInitiativeEffects(actor, combat)
+    .some((effect) => effect.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG)?.messageId === pending.messageId);
+  if (hasEffect) return;
+  await actor.createEmbeddedDocuments("Item", [criticalEffectSource(kind, combatant, pending.messageId)]);
+}
+
+async function resolveCriticalInitiativeEffects(combat, changed) {
+  if (!isActiveGM() || !("turn" in changed || "round" in changed)) return;
+  const current = combat.combatant;
+  const updates = [];
+  const removals = [];
+  for (const combatant of combat.combatants) {
+    const actor = combatant.actor;
+    if (!actor) continue;
+    for (const effect of criticalInitiativeEffects(actor, combat)) {
+      const state = effect.getFlag(MODULE_ID, CRITICAL_INITIATIVE_FLAG);
+      if (state.combatantId !== combatant.id) continue;
+      if (state.kind === "failure" && current?.id === combatant.id) removals.push(effect);
+      else if (state.kind === "success" && current?.id === combatant.id && !state.started) {
+        updates.push(effect.update({ [`flags.${MODULE_ID}.${CRITICAL_INITIATIVE_FLAG}.started`]: true }));
+      } else if (state.kind === "success" && state.started && current?.id !== combatant.id) removals.push(effect);
+    }
+  }
+  await Promise.all([...updates, ...removals.map((effect) => effect.delete())]);
 }
 
 function isHealingConsumable(item) {
@@ -113,19 +240,20 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     id: `${MODULE_ID}-award-panel`,
     classes: [MODULE_ID],
     position: { width: 900, height: 620 },
-    window: { title: "Hero & Bonus Points", icon: "fa-solid fa-star", resizable: true },
+    window: { title: "Lex's Variant Rules", icon: "fa-solid fa-sliders", resizable: true },
     actions: {
       "toggle-all": AwardPanel.#toggleAll,
       "fill-opening": AwardPanel.#fillOpening,
       "apply-awards": AwardPanel.#applyAwards,
       "award-break": AwardPanel.#awardBreak,
+      "award-mid-game-break": AwardPanel.#awardMidGameBreak,
       "change-mythic": AwardPanel.#changeMythic
     }
   };
 
   static PARTS = { panel: { template: `modules/${MODULE_ID}/templates/award-panel.hbs`, root: true, scrollable: [".award-grid"] } };
 
-  get title() { return "Hero & Bonus Points"; }
+  get title() { return "Lex's Variant Rules"; }
 
   async _prepareContext(options) {
     const actors = partyMembers().map((actor) => {
@@ -145,7 +273,13 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
         mythic: { enabled: !!mythic, value: mythic?.value ?? 0, max: mythic?.max ?? 0 }
       };
     });
-    return { ...await super._prepareContext(options), actors, dieSizes: DIE_SIZES };
+    return {
+      ...await super._prepareContext(options),
+      actors,
+      dieSizes: DIE_SIZES,
+      bonusDiceEnabled: bonusDiceEnabled(),
+      midGameBreakEnabled: game.settings.get(MODULE_ID, "midGameBreakHeroPoints")
+    };
   }
 
   selectedRows() {
@@ -166,7 +300,7 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     const updates = this.selectedRows().map((row) => {
       const actor = game.actors.get(row.dataset.actorId);
       const heroPoints = clamp(Number(row.querySelector(".opening-hero")?.value) || 0, 0, 3);
-      const bonusDie = row.querySelector(".bonus-die")?.value ?? "";
+      const bonusDie = bonusDiceEnabled() ? (row.querySelector(".bonus-die")?.value ?? "") : "";
       return actor ? { actor, heroPoints, bonusDie } : null;
     }).filter(Boolean);
     if (!updates.length) return ui.notifications.warn("Select at least one character.");
@@ -174,8 +308,10 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
       const currentHeroPoints = Number(actor.system.resources?.heroPoints?.value) || 0;
       const currentDie = heldDie(actor);
       const heroChanged = currentHeroPoints !== heroPoints;
-      const dieChanged = (bonusDie === "clear" && Boolean(currentDie))
-        || (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie));
+      const dieChanged = bonusDiceEnabled() && (
+        (bonusDie === "clear" && Boolean(currentDie))
+        || (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie))
+      );
       if (heroChanged) await actor.update({ "system.resources.heroPoints.value": heroPoints });
       if (bonusDie === "clear" && currentDie) await actor.unsetFlag(MODULE_ID, "bonusDie");
       else if (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie)) await actor.setFlag(MODULE_ID, "bonusDie", Number(bonusDie));
@@ -214,6 +350,22 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
     this.render({ force: true });
   }
 
+  static async #awardMidGameBreak() {
+    const actors = partyMembers();
+    if (!actors.length) return ui.notifications.warn("No party characters were found.");
+    const awarded = [];
+    const capped = [];
+    await Promise.all(actors.map(async (actor) => {
+      const current = Number(actor.system.resources?.heroPoints?.value) || 0;
+      if (current >= 3) return capped.push(actor.name);
+      await actor.update({ "system.resources.heroPoints.value": current + 1 });
+      awarded.push(actor.name);
+    }));
+    if (awarded.length) await announce(`<p><strong>Mid-game break Hero Point award:</strong> ${awarded.join(", ")} each gain 1 Hero Point.</p>`);
+    if (capped.length) ui.notifications.info(`${capped.join(", ")} ${capped.length === 1 ? "is" : "are"} already at the 3-point cap.`);
+    this.render({ force: true });
+  }
+
   static async #changeMythic(event, target) {
     const actor = game.actors.get(target.dataset.actorId);
     const resource = mythicResource(actor);
@@ -235,6 +387,7 @@ function injectBonusReadout(app, element) {
   if (!root) return;
   const window = root.closest(".app, .application") ?? root;
   window.querySelectorAll(".hero-bonus-die-readout").forEach((element) => element.remove());
+  if (!bonusDiceEnabled()) return;
   const die = heldDie(actor);
   if (!die) return;
 
@@ -407,6 +560,15 @@ async function spendBonusDie(message) {
 }
 
 Hooks.once("init", () => {
+  game.settings.register(MODULE_ID, "bonusDice", {
+    name: "Enable Bonus Dice",
+    hint: "Shows bonus-die controls and lets characters spend held bonus dice on eligible d20 rolls.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    requiresReload: true,
+  });
   game.settings.register(MODULE_ID, "carefulConsumption", {
     name: "Enable Careful Consumption",
     hint: "Lets players choose Regular or Careful Consumption when using a healing consumable through PF2e Toolbelt's Use button.",
@@ -424,8 +586,33 @@ Hooks.once("init", () => {
     type: Boolean,
     default: false,
   });
+  game.settings.register(MODULE_ID, "dynamicStride", {
+    name: "Add Dynamic Stride",
+    hint: "Adds the two-action Dynamic Stride activity to the world's Items directory when enabled.",
+    scope: "world",
+    config: game.system.id === "pf2e",
+    type: Boolean,
+    default: false,
+    onChange: (enabled) => { if (enabled) void ensureDynamicStride(); }
+  });
+  game.settings.register(MODULE_ID, "criticalInitiative", {
+    name: "Enable Critical Initiative",
+    hint: "A natural 20 on initiative grants Quickened through the end of the combatant's first turn. A natural 1 applies Off-Guard until the start of that turn.",
+    scope: "world",
+    config: game.system.id === "pf2e",
+    type: Boolean,
+    default: false,
+  });
+  game.settings.register(MODULE_ID, "midGameBreakHeroPoints", {
+    name: "Enable Mid-Game Break Hero Point Awards",
+    hint: "Adds a deliberate panel button that awards 1 Hero Point to every party character below the 3-point cap.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: false,
+  });
   game.settings.registerMenu(MODULE_ID, "awardPanel", {
-    name: "Hero & Bonus Points",
+    name: "Hero Points, Mythic Points, and Bonus Dice",
     label: "Open Award Panel",
     hint: "Set session Hero Points and award Hero, Mythic, and bonus-die resources.",
     icon: "fa-solid fa-star",
@@ -436,6 +623,7 @@ Hooks.once("init", () => {
 
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = { open: () => new AwardPanel().render({ force: true }) };
+  if (game.settings.get(MODULE_ID, "dynamicStride")) void ensureDynamicStride();
 });
 
 Hooks.on("pf2e-toolbelt.preUsePhysicalItem", (context) => {
@@ -446,6 +634,23 @@ Hooks.on("pf2e-toolbelt.preUsePhysicalItem", (context) => {
 
 Hooks.on("renderActorSheetV2", injectBonusReadout);
 Hooks.on("renderActorSheet", injectBonusReadout);
+Hooks.on("createChatMessage", (message) => {
+  if (!criticalInitiativeEnabled() || !isActiveGM()) return;
+  const natural = initiativeNatural(message);
+  const actor = actorFromMessage(message);
+  if (!actor || ![1, 20].includes(natural)) return;
+  pendingInitiatives.set(actor.uuid, { natural, messageId: message.id });
+});
+Hooks.on("updateCombatant", (combatant, changed) => {
+  if (!criticalInitiativeEnabled() || !isActiveGM() || !("initiative" in changed)) return;
+  const pending = combatant.actor ? pendingInitiatives.get(combatant.actor.uuid) : null;
+  if (!pending) return;
+  pendingInitiatives.delete(combatant.actor.uuid);
+  void applyCriticalInitiative(combatant, pending);
+});
+Hooks.on("updateCombat", (combat, changed) => {
+  void resolveCriticalInitiativeEffects(combat, changed);
+});
 Hooks.on("getChatMessageContextOptions", (_application, menuItems) => {
   menuItems.push({
     name: "Add Bonus Die to Roll",

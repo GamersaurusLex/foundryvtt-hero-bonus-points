@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Renamed the module to **Lex's Variant Rules** while retaining the existing module ID for installed-world compatibility.
+- Added settings for Bonus Dice, Dynamic Stride, Critical Initiative, and deliberate Mid-Game Break Hero Point awards.
+- Adds named Critical Initiative Success and Critical Initiative Failure effects with first-turn lifecycle handling.
+
 ## Next
 
 - Adds the Careful Consumption variant-rule hook for PF2e Toolbelt's inventory **Use** control.

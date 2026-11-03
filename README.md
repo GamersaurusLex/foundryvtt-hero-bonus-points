@@ -1,6 +1,6 @@
-# Hero & Bonus Points
+# Lex's Variant Rules
 
-A Foundry VTT v14 module for PF2e and SF2e that gives the GM one native award panel for Hero Points, Mythic Points, and bonus dice.
+A Foundry VTT v14 module for PF2e and SF2e that gives the GM one native award panel for Hero Points, Mythic Points, and optional bonus dice. It also hosts GM-selectable PF2e variant rules.
 
 ## What it does
 
@@ -15,7 +15,14 @@ For a supported PF2e check with a DC, the bonus die is folded into the original 
 
 ## Use
 
-Open **Game Settings → Hero & Bonus Points → Open Award Panel**. The panel is GM-only; award announcements are public. Players see a read-only held-bonus-die indicator on their character sheet.
+Open **Game Settings → Lex's Variant Rules → Open Award Panel**. The panel is GM-only; award announcements are public. Players see a read-only held-bonus-die indicator on their character sheet when Bonus Dice are enabled.
+
+## Variant rules
+
+- **Careful Consumption:** eligible healing consumables can be consumed normally or carefully for maximum healing.
+- **Dynamic Stride:** adds the two-action activity to the world Items directory when enabled.
+- **Critical Initiative:** a natural 20 applies **Critical Initiative Success** (Quickened through the end of the actor's first turn); a natural 1 applies **Critical Initiative Failure** (Off-Guard until that turn begins).
+- **Mid-Game Break Hero Points:** adds a deliberate panel button that awards one Hero Point to every party character below the cap.
 
 Enable **Careful Consumption** from the module settings after installing the companion Gamersaurus Lex fork of PF2e Toolbelt. The Toolbelt hook preserves its normal consumption workflow when a player selects **Regular Consumption**.
 

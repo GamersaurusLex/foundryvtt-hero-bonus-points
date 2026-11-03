@@ -1,7 +1,7 @@
 {
   "id": "hero-bonus-points",
-  "title": "Hero & Bonus Points",
-  "description": "GM-awarded Hero Points, Mythic Points, and spendable bonus dice for PF2e and SF2e.",
+  "title": "Lex's Variant Rules",
+  "description": "GM tools and optional variant rules for PF2e and SF2e, including Hero Points, Mythic Points, bonus dice, Careful Consumption, Dynamic Stride, and Critical Initiative.",
   "version": "0.1.2",
   "url": "https://github.com/GamersaurusLex/foundryvtt-hero-bonus-points",
   "manifest": "https://github.com/GamersaurusLex/foundryvtt-hero-bonus-points/releases/latest/download/module.json",
