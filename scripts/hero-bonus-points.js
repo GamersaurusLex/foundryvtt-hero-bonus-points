@@ -1,11 +1,20 @@
 const MODULE_ID = "hero-bonus-points";
 const DIE_SIZES = [4, 6, 8, 10, 12];
 const CRITICAL_INITIATIVE_FLAG = "criticalInitiative";
+const ORACULAR_WARNING_FLAG = "oracularWarning";
+const RETRIBUTIVE_STRIKE_FLAG = "retributiveStrike";
+const RETRIBUTIVE_STRIKE_SOCKET = `module.${MODULE_ID}`;
+const ORACULAR_WARNING_UUIDS = {
+  effect: "Compendium.pf2e.feat-effects.Item.7XxZ4YJ6c97D9Fc9",
+  initiative: "Compendium.pf2e.feat-effects.Item.ETZHTCjlOUHHSE0Z"
+};
+const CHAMPIONS_RESISTANCE_UUID = "Compendium.pf2e.feat-effects.Item.DawVHfoPKbPJsz4k";
 const CONDITION_UUIDS = {
   quickened: "Compendium.pf2e.conditionitems.Item.nlCjDvLMf2EkV2dl",
   offGuard: "Compendium.pf2e.conditionitems.Item.AJh5ex99aV6VTggg"
 };
 const pendingInitiatives = new Map();
+const pendingOracularWarnings = new Map();
 const breaktimeRenderListeners = new WeakSet();
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
@@ -58,8 +67,319 @@ function criticalInitiativeEnabled() {
   return game.system.id === "pf2e" && game.settings.get(MODULE_ID, "criticalInitiative");
 }
 
+function oracularWarningEnabled() {
+  return game.system.id === "pf2e" && game.settings.get(MODULE_ID, "oracularWarning");
+}
+
 function isActiveGM() {
   return game.user.isGM && game.users.activeGM?.id === game.user.id;
+}
+
+function hasOracularWarning(actor) {
+  return actor?.items?.some((item) => item.type === "feat" && item.slug === "oracular-warning");
+}
+
+function conditionValue(actor, slug) {
+  const condition = actor?.items?.find((item) => item.type === "condition" && item.slug === slug);
+  return Number(condition?.system?.value?.value) || 0;
+}
+
+function oracularWarningBonus(oracle) {
+  const cursebound = conditionValue(oracle, "cursebound");
+  return cursebound >= 3 ? 4 : cursebound >= 2 ? 3 : 2;
+}
+
+function isDeafened(actor) {
+  return actor?.items?.some((item) => item.type === "condition" && item.slug === "deafened");
+}
+
+function isFriendlyToken(token) {
+  return token?.actor?.type === "character" || token?.document?.disposition === CONST.TOKEN_DISPOSITIONS.FRIENDLY;
+}
+
+function tokenDistance(origin, target) {
+  return origin?.distanceTo?.(target) ?? canvas.grid.measurePath([origin.center, target.center]).distance;
+}
+
+function oracularWarningEffects(actor, combat, targetTokenId) {
+  return actor.items.filter((item) => {
+    const state = item.getFlag(MODULE_ID, ORACULAR_WARNING_FLAG);
+    return state?.combatId === combat.id && state?.targetTokenId === targetTokenId;
+  });
+}
+
+async function oracularWarningSources(oracle, combat, targetTokenId) {
+  const [effect, initiative] = await Promise.all([
+    fromUuid(ORACULAR_WARNING_UUIDS.effect),
+    fromUuid(ORACULAR_WARNING_UUIDS.initiative)
+  ]);
+  if (effect?.type !== "effect" || initiative?.type !== "effect") return [];
+
+  const bonus = oracularWarningBonus(oracle);
+  const temporaryHP = Math.max(Math.floor((Number(oracle.level) || 0) / 2), 1);
+  const createSource = (nativeEffect, kind, rules) => {
+    const source = nativeEffect.toObject();
+    delete source._id;
+    source.name = kind === "initiative"
+      ? `Oracular Warning (Initiative) — ${oracle.name}`
+      : `Oracular Warning — ${oracle.name}`;
+    source.system.description.value = kind === "initiative"
+      ? `<p>${oracle.name}'s warning grants a +${bonus} status bonus to this initiative roll.</p>`
+      : `<p>${oracle.name}'s warning grants ${temporaryHP} temporary Hit Points for 1 minute.</p>`;
+    source.system.rules = rules;
+    source.flags = foundry.utils.mergeObject(source.flags ?? {}, {
+      [MODULE_ID]: {
+        [ORACULAR_WARNING_FLAG]: {
+          combatId: combat.id,
+          targetTokenId,
+          oracleActorId: oracle.id,
+          kind,
+          bonus,
+          temporaryHP
+        }
+      }
+    }, { inplace: false });
+    return source;
+  };
+
+  return [
+    createSource(effect, "temporary-hp", [{ key: "TempHP", value: temporaryHP }]),
+    createSource(initiative, "initiative", [{
+      key: "FlatModifier",
+      removeAfterRoll: true,
+      selector: "initiative",
+      slug: `oracular-warning-${oracle.id}`,
+      type: "status",
+      value: bonus
+    }])
+  ];
+}
+
+async function applyOracularWarnings(combat) {
+  const combatSceneId = combat?.scene?.id ?? combat?.sceneId;
+  if (!oracularWarningEnabled() || !isActiveGM() || !combat || (combatSceneId && combatSceneId !== canvas.scene?.id)) return;
+  const combatTokens = combat.combatants
+    .map((combatant) => canvas.tokens.get(combatant.tokenId))
+    .filter((token) => token?.actor);
+  const oracles = combatTokens.filter((token) => hasOracularWarning(token.actor));
+  if (!oracles.length) return;
+
+  const applied = [];
+  for (const oracleToken of oracles) {
+    for (const targetToken of combatTokens) {
+      if (targetToken === oracleToken || !isFriendlyToken(targetToken) || isDeafened(targetToken.actor)) continue;
+      if (tokenDistance(oracleToken, targetToken) > 20) continue;
+      const existing = oracularWarningEffects(targetToken.actor, combat, targetToken.id)
+        .some((effect) => effect.getFlag(MODULE_ID, ORACULAR_WARNING_FLAG)?.oracleActorId === oracleToken.actor.id);
+      if (existing) continue;
+      const sources = await oracularWarningSources(oracleToken.actor, combat, targetToken.id);
+      if (!sources.length) continue;
+      await targetToken.actor.createEmbeddedDocuments("Item", sources);
+      applied.push(`${targetToken.name} (+${oracularWarningBonus(oracleToken.actor)} initiative, ${Math.max(Math.floor((Number(oracleToken.actor.level) || 0) / 2), 1)} temporary HP)`);
+    }
+  }
+  if (applied.length) {
+    await announce(`<p><strong>Oracular Warning:</strong> ${applied.join(", ")}.</p>`);
+  }
+}
+
+function scheduleOracularWarnings(combat) {
+  if (!oracularWarningEnabled() || !combat?.id) return;
+  const pending = pendingOracularWarnings.get(combat.id);
+  if (pending) {
+    pending.queued = true;
+    return;
+  }
+  const state = { queued: false };
+  const task = Promise.resolve()
+    .then(async () => {
+      do {
+        state.queued = false;
+        await applyOracularWarnings(combat);
+      } while (state.queued);
+    })
+    .catch((error) => console.error(`${MODULE_ID} | could not apply Oracular Warning`, error))
+    .finally(() => pendingOracularWarnings.delete(combat.id));
+  state.task = task;
+  pendingOracularWarnings.set(combat.id, state);
+}
+
+function retributiveStrikeEnabled() {
+  return game.system.id === "pf2e" && game.settings.get(MODULE_ID, "retributiveStrike");
+}
+
+function isRetributiveStrike(item) {
+  return item?.type === "action" && item.slug === "retributive-strike";
+}
+
+function championAuraRadius(actor) {
+  const radius = Number(actor?.flags?.system?.champion?.aura) || 0;
+  const options = actor?.getRollOptions?.(["all"]) ?? [];
+  const auraActive = options instanceof Set
+    ? options.has("champions-aura")
+    : options.includes?.("champions-aura");
+  return radius > 0 && auraActive ? radius : 0;
+}
+
+function tokenIsAllyOf(token) {
+  const actor = token?.actor ?? token?.document?.actor;
+  const friendly = token?.document?.disposition === CONST.TOKEN_DISPOSITIONS.FRIENDLY;
+  return !!actor && (actor.type === "character" || friendly);
+}
+
+function championTokenFor(message, actor) {
+  return message?.token?.object
+    ?? canvas.tokens.controlled.find((token) => token.actor === actor)
+    ?? canvas.tokens.placeables.find((token) => token.actor === actor);
+}
+
+function retributiveTargets(champion, targets = game.user.targets) {
+  const targetList = [...targets].map((token) => token.object ?? token);
+  if (!champion?.actor) return { ally: null, enemy: null };
+  return {
+    ally: targetList.find((token) => token !== champion && tokenIsAllyOf(token)),
+    enemy: targetList.find((token) => token !== champion && !tokenIsAllyOf(token))
+  };
+}
+
+function damageRollFromMessage(message) {
+  return message?.isDamageRoll ? message.rolls?.[0] ?? null : null;
+}
+
+function triggeringDamageMessage(enemy) {
+  const now = Date.now();
+  return game.messages.contents
+    .filter((message) => message.actor?.id === enemy.actor?.id
+      && !!damageRollFromMessage(message)
+      && now - (message.timestamp ?? 0) < 60_000
+      && !message.getFlag(MODULE_ID, RETRIBUTIVE_STRIKE_FLAG)?.resolved)
+    .sort((a, b) => b.timestamp - a.timestamp)[0] ?? null;
+}
+
+function selectedRetributiveStrike(actor) {
+  const lastWeaponId = actor?.getFlag(MODULE_ID, "lastMeleeStrikeItemId");
+  const meleeStrikes = (actor?.system?.actions ?? []).filter((strike) => strike.ready && strike.item?.isOfType?.("weapon") && strike.item.isMelee);
+  return meleeStrikes.find((strike) => strike.item.id === lastWeaponId) ?? meleeStrikes[0] ?? null;
+}
+
+function retributiveStrikeInReach(champion, enemy, strike) {
+  const reach = champion.actor.getReach?.({ action: "attack", weapon: strike.item }) ?? 5;
+  return tokenDistance(champion, enemy) <= reach;
+}
+
+function retributiveValidation({ actor, champion, ally, enemy }) {
+  if (!champion) return "Select the champion's token before using Retributive Strike.";
+  if (!ally) return "Target the ally you want to protect, then use Retributive Strike.";
+  if (!enemy) return "Target the enemy that dealt the damage, then use Retributive Strike.";
+  const aura = championAuraRadius(actor);
+  if (!aura) return `${actor.name}'s Champion's Aura is not active.`;
+  const outside = [ally, enemy].filter((token) => tokenDistance(champion, token) > aura);
+  if (outside.length) return `${outside.map((token) => token.name).join(" and ")} ${outside.length === 1 ? "is" : "are"} outside ${actor.name}'s ${aura}-foot Champion's Aura.`;
+  return null;
+}
+
+function retributiveRequestIsValid(request) {
+  const champion = canvas.tokens.get(request.championTokenId);
+  const ally = canvas.tokens.get(request.allyTokenId);
+  const enemy = canvas.tokens.get(request.enemyTokenId);
+  const actor = game.actors.get(request.championActorId);
+  const error = retributiveValidation({ actor, champion, ally, enemy });
+  if (error) return { error };
+  if (!isRetributiveStrike(actor.items.get(request.actionItemId))) return { error: "Retributive Strike is no longer available to that champion." };
+  const damageMessage = game.messages.get(request.damageMessageId);
+  if (!damageMessage || damageMessage.actor?.id !== enemy.actor?.id || !damageRollFromMessage(damageMessage)) return { error: "The triggering damage roll is no longer available." };
+  if (damageMessage.getFlag(MODULE_ID, RETRIBUTIVE_STRIKE_FLAG)?.resolved) return { error: "That damage roll has already been protected by Retributive Strike." };
+  const user = game.users.get(request.userId);
+  if (!user || !actor.testUserPermission(user, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) return { error: "The requesting user does not own this champion." };
+  return { actor, champion, ally, enemy, damageMessage };
+}
+
+async function championResistanceSource(champion) {
+  const nativeEffect = await fromUuid(CHAMPIONS_RESISTANCE_UUID);
+  if (nativeEffect?.type !== "effect") return null;
+  const source = nativeEffect.toObject();
+  delete source._id;
+  const resistance = Number(champion.level) + 2;
+  source.name = `Champion's Resistance — ${champion.name}`;
+  source.system.description.value = `<p>${champion.name}'s Retributive Strike grants resistance ${resistance} to the triggering damage.</p>`;
+  source.system.rules = [{ key: "Resistance", type: "all-damage", value: resistance }];
+  source.flags = foundry.utils.mergeObject(source.flags ?? {}, {
+    [MODULE_ID]: { [RETRIBUTIVE_STRIKE_FLAG]: { championActorId: champion.id } }
+  }, { inplace: false });
+  return source;
+}
+
+async function resolveRetributiveStrike(request) {
+  const validated = retributiveRequestIsValid(request);
+  if (validated.error) return validated;
+  const { actor, champion, ally, enemy, damageMessage } = validated;
+  const effectSource = await championResistanceSource(actor);
+  if (!effectSource) return { error: "PF2e's Champion's Resistance effect could not be found." };
+  const [effect] = await ally.actor.createEmbeddedDocuments("Item", [effectSource]);
+  try {
+    await ally.actor.applyDamage({
+      damage: damageRollFromMessage(damageMessage),
+      token: ally,
+      item: damageMessage.item,
+      rollOptions: new Set(),
+      outcome: damageMessage.flags.pf2e?.context?.outcome
+    });
+    await damageMessage.setFlag(MODULE_ID, RETRIBUTIVE_STRIKE_FLAG, { resolved: true, championActorId: actor.id, allyTokenId: ally.id });
+  } finally {
+    await effect?.delete();
+  }
+  const strike = selectedRetributiveStrike(actor);
+  const strikeInReach = !!strike && retributiveStrikeInReach(champion, enemy, strike);
+  await announce(`<p><strong>Retributive Strike:</strong> ${actor.name} protects ${ally.name} from ${enemy.name} with resistance ${Number(actor.level) + 2}.${strikeInReach ? ` ${actor.name} follows with ${strike.item.name}.` : " The enemy is outside the champion's melee reach."}</p>`);
+  return { requestId: request.requestId, strike: strikeInReach, strikeItemId: strike?.item?.id ?? null, enemyTokenId: enemy.id };
+}
+
+async function rollRetributiveStrike(response) {
+  if (!response?.strike) return;
+  const actor = game.actors.get(response.championActorId);
+  const enemy = canvas.tokens.get(response.enemyTokenId);
+  const strike = (actor?.system?.actions ?? []).find((candidate) => candidate.item?.id === response.strikeItemId);
+  if (!actor || !enemy || !strike) return;
+  await strike.variants[0].roll({ target: enemy });
+}
+
+async function beginRetributiveStrike(message) {
+  if (!retributiveStrikeEnabled() || !message.isAuthor || !isRetributiveStrike(message.item)) return;
+  const actor = message.actor;
+  const champion = championTokenFor(message, actor);
+  const { ally, enemy } = retributiveTargets(champion);
+  const error = retributiveValidation({ actor, champion, ally, enemy });
+  if (error) return ui.notifications.warn(error);
+  const damageMessage = triggeringDamageMessage(enemy);
+  if (!damageMessage) return ui.notifications.warn(`No fresh damage roll from ${enemy.name} was found. Use Retributive Strike immediately after the triggering damage is rolled.`);
+  const strike = selectedRetributiveStrike(actor);
+  const strikeText = strike && retributiveStrikeInReach(champion, enemy, strike)
+    ? ` Then strike ${enemy.name} with ${strike.item.name}.`
+    : ` ${enemy.name} is outside your current melee reach, so this will only protect ${ally.name}.`;
+  const confirm = await foundry.applications.api.DialogV2.confirm({
+    window: { title: "Retributive Strike" },
+    content: `<p>Protect <strong>${ally.name}</strong> from <strong>${enemy.name}</strong> with Retributive Strike?${strikeText}</p>`,
+    yes: { label: `Protect ${ally.name}` },
+    no: { label: "Cancel" }
+  });
+  if (!confirm) return;
+  const request = {
+    type: "retributive-strike-request",
+    requestId: foundry.utils.randomID(),
+    userId: game.user.id,
+    championActorId: actor.id,
+    championTokenId: champion.id,
+    allyTokenId: ally.id,
+    enemyTokenId: enemy.id,
+    actionItemId: message.item.id,
+    damageMessageId: damageMessage.id
+  };
+  if (isActiveGM()) {
+    const response = await resolveRetributiveStrike(request);
+    if (response.error) return ui.notifications.warn(response.error);
+    return rollRetributiveStrike({ ...response, championActorId: actor.id });
+  }
+  game.socket.emit(RETRIBUTIVE_STRIKE_SOCKET, request);
 }
 
 function isDynamicStride(item) {
@@ -612,6 +932,22 @@ Hooks.once("init", () => {
     type: Boolean,
     default: false,
   });
+  game.settings.register(MODULE_ID, "oracularWarning", {
+    name: "A PC Has Oracular Warning",
+    hint: "When initiative begins, each non-deafened friendly combatant within 20 feet of an Oracle with Oracular Warning receives its initiative status bonus and temporary Hit Points.",
+    scope: "world",
+    config: game.system.id === "pf2e",
+    type: Boolean,
+    default: false,
+  });
+  game.settings.register(MODULE_ID, "retributiveStrike", {
+    name: "A PC Has Retributive Strike",
+    hint: "When the champion targets a damaged ally and the triggering enemy, using Retributive Strike validates the Champion's Aura, applies Champion's Resistance to the triggering damage, and rolls a melee Strike if the enemy is in reach.",
+    scope: "world",
+    config: game.system.id === "pf2e",
+    type: Boolean,
+    default: false,
+  });
   game.settings.register(MODULE_ID, "midGameBreakHeroPoints", {
     name: "Enable Mid-Game Break Hero Point Awards",
     hint: "Adds a deliberate award button to the Break Time window and Award Panel. It awards 1 Hero Point to every party character below the 3-point cap.",
@@ -680,6 +1016,15 @@ function registerBreakTimeIntegration() {
 
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = { open: () => new AwardPanel().render({ force: true }) };
+  game.socket.on(RETRIBUTIVE_STRIKE_SOCKET, async (payload) => {
+    if (payload?.type === "retributive-strike-request" && isActiveGM()) {
+      const response = await resolveRetributiveStrike(payload).catch((error) => ({ error: error.message ?? "Retributive Strike could not be resolved." }));
+      game.socket.emit(RETRIBUTIVE_STRIKE_SOCKET, { type: "retributive-strike-response", userId: payload.userId, championActorId: payload.championActorId, ...response });
+    } else if (payload?.type === "retributive-strike-response" && payload.userId === game.user.id) {
+      if (payload.error) ui.notifications.warn(payload.error);
+      else await rollRetributiveStrike(payload);
+    }
+  });
   registerBreakTimeIntegration();
   void removeLegacyCriticalInitiativeEffects();
   if (game.settings.get(MODULE_ID, "dynamicStride")) void ensureDynamicStride();
@@ -693,6 +1038,13 @@ Hooks.on("pf2e-toolbelt.preUsePhysicalItem", (context) => {
 
 Hooks.on("renderActorSheetV2", injectBonusReadout);
 Hooks.on("renderActorSheet", injectBonusReadout);
+Hooks.on("createChatMessage", (message) => {
+  if (!message.isAuthor) return;
+  if (message.flags.pf2e?.context?.type === "attack-roll" && message.item?.isOfType?.("weapon") && message.item.isMelee) {
+    void message.actor?.setFlag(MODULE_ID, "lastMeleeStrikeItemId", message.item.id);
+  }
+  void beginRetributiveStrike(message);
+});
 Hooks.on("createChatMessage", (message) => {
   if (!criticalInitiativeEnabled() || !isActiveGM()) return;
   const natural = initiativeNatural(message);
@@ -709,6 +1061,12 @@ Hooks.on("updateCombatant", (combatant, changed) => {
 });
 Hooks.on("updateCombat", (combat, changed) => {
   void resolveCriticalInitiativeEffects(combat, changed);
+});
+Hooks.on("createCombat", (combat) => {
+  scheduleOracularWarnings(combat);
+});
+Hooks.on("createCombatant", (combatant) => {
+  scheduleOracularWarnings(combatant.combat ?? game.combats.get(combatant.combatId) ?? combatant.parent);
 });
 Hooks.on("getChatMessageContextOptions", (_application, menuItems) => {
   menuItems.push({

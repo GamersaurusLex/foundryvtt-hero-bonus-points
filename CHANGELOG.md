@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Adds optional **Retributive Strike** automation for PF2e champions.
+- Validates the selected protected ally and triggering enemy against the Champion's Aura, applies the native Champion's Resistance effect to the triggering damage, and rolls the champion's ready melee Strike when the enemy is within reach.
+- Adds **Oracular Warning** to the module feature list.
+
 ## 0.1.3
 
 - Renamed the module to **Lex's Variant Rules** while retaining the existing module ID for installed-world compatibility.
