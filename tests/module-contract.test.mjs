@@ -77,6 +77,7 @@ test("Retributive Strike validates targets, uses the native resistance effect, a
   assert.match(source, /await effect\?\.delete\(\)/);
   assert.match(source, /strike\.variants\[0\]\.roll\(\{ target: enemy \}\)/);
   assert.match(source, /game\.socket\.on\(RETRIBUTIVE_STRIKE_SOCKET/);
+  assert.doesNotMatch(source, /timestamp\s*\?\?\s*0\)\s*<\s*60_000/);
 });
 
 test("mid-game Hero Point awards are deliberate and available during Break Time", async () => {

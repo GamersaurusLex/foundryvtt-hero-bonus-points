@@ -247,11 +247,9 @@ function damageRollFromMessage(message) {
 }
 
 function triggeringDamageMessage(enemy) {
-  const now = Date.now();
   return game.messages.contents
     .filter((message) => message.actor?.id === enemy.actor?.id
       && !!damageRollFromMessage(message)
-      && now - (message.timestamp ?? 0) < 60_000
       && !message.getFlag(MODULE_ID, RETRIBUTIVE_STRIKE_FLAG)?.resolved)
     .sort((a, b) => b.timestamp - a.timestamp)[0] ?? null;
 }
@@ -351,7 +349,7 @@ async function beginRetributiveStrike(message) {
   const error = retributiveValidation({ actor, champion, ally, enemy });
   if (error) return ui.notifications.warn(error);
   const damageMessage = triggeringDamageMessage(enemy);
-  if (!damageMessage) return ui.notifications.warn(`No fresh damage roll from ${enemy.name} was found. Use Retributive Strike immediately after the triggering damage is rolled.`);
+  if (!damageMessage) return ui.notifications.warn(`No unresolved damage roll from ${enemy.name} was found.`);
   const strike = selectedRetributiveStrike(actor);
   const strikeText = strike && retributiveStrikeInReach(champion, enemy, strike)
     ? ` Then strike ${enemy.name} with ${strike.item.name}.`

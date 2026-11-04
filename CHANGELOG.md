@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Retributive Strike now uses the targeted enemy's latest unresolved PF2e damage roll regardless of its age, so the reaction survives breaks, reloads, and resumed combats.
+
 ## 0.1.5
 
 - Adds optional **Retributive Strike** automation for PF2e champions.
