@@ -12,12 +12,12 @@
     </div>
   </header>
 
-  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>{{#if bonusDiceEnabled}}, choose any bonus dice{{/if}}, then apply the selected rows together.{{#if bonusDiceEnabled}} Use <strong>Clear</strong> to remove a bonus die.{{/if}}</p>
+  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>, then apply the selected rows together. Mythic <strong>Set</strong> replaces a character’s current value; Mythic <strong>Add</strong> awards extra points after that value is set.{{#if bonusDiceEnabled}} Choose any bonus dice, or use <strong>Clear</strong> to remove one.{{/if}}</p>
 
   <div class="award-grid" role="table" aria-label="Party points">
     <div class="award-row award-labels" role="row">
       <span><input type="checkbox" data-action="toggle-all" checked aria-label="Select all party members"></span>
-      <span>Character</span><span>Hero Points</span><span>Opening Set</span><span>Mythic Points</span>{{#if bonusDiceEnabled}}<span>Held Bonus Die</span>{{/if}}
+      <span>Character</span><span>Hero Points</span><span>Opening Set</span><span>Mythic Points</span><span>Mythic Set</span><span>Mythic Add</span>{{#if bonusDiceEnabled}}<span>Held Bonus Die</span>{{/if}}
     </div>
     {{#each actors}}
       <div class="award-row" role="row" data-actor-id="{{id}}">
@@ -25,9 +25,23 @@
         <span class="actor-name"><img src="{{img}}" alt="">{{name}}</span>
         <span class="resource-value">{{hero.value}} / 3</span>
         <span><input class="opening-hero" type="number" min="0" max="3" value="{{hero.value}}" aria-label="Opening Hero Points for {{name}}"></span>
+        <span class="resource-value">
+          {{#if mythic.enabled}}
+            {{mythic.value}} / {{mythic.max}}
+          {{else}}
+            <em>—</em>
+          {{/if}}
+        </span>
         <span>
           {{#if mythic.enabled}}
-            <div class="mythic-control"><button type="button" data-action="change-mythic" data-actor-id="{{id}}" data-delta="-1" aria-label="Remove Mythic Point from {{name}}">−</button><strong>{{mythic.value}} / {{mythic.max}}</strong><button type="button" data-action="change-mythic" data-actor-id="{{id}}" data-delta="1" aria-label="Award Mythic Point to {{name}}">+</button></div>
+            <input class="mythic-set" type="number" min="0" max="{{mythic.max}}" value="{{mythic.value}}" aria-label="Set Mythic Points for {{name}}">
+          {{else}}
+            <em>—</em>
+          {{/if}}
+        </span>
+        <span>
+          {{#if mythic.enabled}}
+            <input class="mythic-add" type="number" min="0" max="3" value="0" aria-label="Add Mythic Points for {{name}}">
           {{else}}
             <em>—</em>
           {{/if}}

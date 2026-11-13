@@ -14,11 +14,16 @@ test("manifest targets Foundry V14 and both supported systems", async () => {
 
 test("award panel exposes the required GM workflows", async () => {
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
-  for (const action of ["apply-awards", "award-break", "award-mid-game-break", "change-mythic"]) {
+  for (const action of ["apply-awards", "award-break", "award-mid-game-break"]) {
     assert.match(source, new RegExp(`"${action}"`));
   }
   assert.match(source, /Math\.min\(maximum, Math\.max\(minimum, value\)\)/);
   assert.match(source, /bonusDie === "clear"/);
+  assert.match(source, /mythicChanged/);
+  assert.match(source, /mythicSet/);
+  assert.match(source, /mythicAdd/);
+  assert.match(source, /Mythic Points —/);
+  assert.doesNotMatch(source, /Mythic Points:<\/strong> \$\{actor\.name\}/);
   assert.doesNotMatch(source, /actor\.sheet\?\.render/);
 });
 

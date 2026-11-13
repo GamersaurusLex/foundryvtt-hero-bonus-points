@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Mythic Point changes in the award panel now stage alongside Hero Points and bonus dice, then apply in one batch with a single public session-award summary.
+- Relies on PF2e and SF2e's native **Rewrite Fate** chat-card reroll control, which spends a Mythic Point and rerolls with Mythic Proficiency.
+
 ## 0.1.6
 
 - Retributive Strike now uses the targeted enemy's latest unresolved PF2e damage roll regardless of its age, so the reaction survives breaks, reloads, and resumed combats.

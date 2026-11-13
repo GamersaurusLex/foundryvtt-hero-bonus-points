@@ -577,15 +577,14 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-award-panel`,
     classes: [MODULE_ID],
-    position: { width: 900, height: 620 },
+    position: { width: 1000, height: 620 },
     window: { title: "Lex's Variant Rules", icon: "fa-solid fa-sliders", resizable: true },
     actions: {
       "toggle-all": AwardPanel.#toggleAll,
       "fill-opening": AwardPanel.#fillOpening,
       "apply-awards": AwardPanel.#applyAwards,
       "award-break": AwardPanel.#awardBreak,
-      "award-mid-game-break": AwardPanel.#awardMidGameBreak,
-      "change-mythic": AwardPanel.#changeMythic
+      "award-mid-game-break": AwardPanel.#awardMidGameBreak
     }
   };
 
@@ -639,23 +638,35 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
       const actor = game.actors.get(row.dataset.actorId);
       const heroPoints = clamp(Number(row.querySelector(".opening-hero")?.value) || 0, 0, 3);
       const bonusDie = bonusDiceEnabled() ? (row.querySelector(".bonus-die")?.value ?? "") : "";
-      return actor ? { actor, heroPoints, bonusDie } : null;
+      const mythic = mythicResource(actor);
+      const mythicSet = mythic
+        ? clamp(Number(row.querySelector(".mythic-set")?.value) || 0, 0, mythic.max)
+        : null;
+      const mythicAdd = mythic
+        ? clamp(Number(row.querySelector(".mythic-add")?.value) || 0, 0, 3)
+        : 0;
+      return actor ? { actor, heroPoints, bonusDie, mythic, mythicSet, mythicAdd } : null;
     }).filter(Boolean);
     if (!updates.length) return ui.notifications.warn("Select at least one character.");
-    const applied = await Promise.all(updates.map(async ({ actor, heroPoints, bonusDie }) => {
+    const applied = await Promise.all(updates.map(async ({ actor, heroPoints, bonusDie, mythic, mythicSet, mythicAdd }) => {
       const currentHeroPoints = Number(actor.system.resources?.heroPoints?.value) || 0;
       const currentDie = heldDie(actor);
       const heroChanged = currentHeroPoints !== heroPoints;
+      const mythicPoints = mythic ? clamp(mythicSet + mythicAdd, 0, mythic.max) : null;
+      const mythicChanged = Boolean(mythic) && Number(mythic.value) !== mythicPoints;
       const dieChanged = bonusDiceEnabled() && (
         (bonusDie === "clear" && Boolean(currentDie))
         || (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie))
       );
-      if (heroChanged) await actor.update({ "system.resources.heroPoints.value": heroPoints });
+      const resourceUpdate = {};
+      if (heroChanged) resourceUpdate["system.resources.heroPoints.value"] = heroPoints;
+      if (mythicChanged) resourceUpdate["system.resources.mythicPoints.value"] = mythicPoints;
+      if (Object.keys(resourceUpdate).length) await actor.update(resourceUpdate);
       if (bonusDie === "clear" && currentDie) await actor.unsetFlag(MODULE_ID, "bonusDie");
       else if (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie)) await actor.setFlag(MODULE_ID, "bonusDie", Number(bonusDie));
-      return { actor, heroPoints, bonusDie, heroChanged, dieChanged };
+      return { actor, heroPoints, bonusDie, heroChanged, mythicChanged, mythicPoints, mythic, mythicSet, mythicAdd, dieChanged };
     }));
-    const changed = applied.filter((award) => award.heroChanged || award.dieChanged);
+    const changed = applied.filter((award) => award.heroChanged || award.mythicChanged || award.dieChanged);
     if (!changed.length) return ui.notifications.info("No selected awards changed.");
     const heroSummary = applied.filter(({ heroChanged }) => heroChanged)
       .map(({ actor, heroPoints }) => `${actor.name} (${heroPoints})`).join(", ");
@@ -663,8 +674,14 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
       .map(({ actor, bonusDie }) => `${actor.name} (d${bonusDie})`).join(", ");
     const cleared = applied.filter(({ dieChanged, bonusDie }) => dieChanged && bonusDie === "clear")
       .map(({ actor }) => actor.name).join(", ");
+    const mythicSummary = applied.filter(({ mythicChanged }) => mythicChanged)
+      .map(({ actor, mythicPoints, mythic, mythicSet, mythicAdd }) => {
+        const operation = mythicAdd > 0 ? `set ${mythicSet}, add ${mythicAdd}` : `set ${mythicSet}`;
+        return `${actor.name} (${operation}; ${mythicPoints} / ${mythic.max})`;
+      }).join(", ");
     const summaries = [
       heroSummary && `Hero Points — ${heroSummary}.`,
+      mythicSummary && `Mythic Points — ${mythicSummary}.`,
       dieSummary && `Bonus dice — ${dieSummary}.`,
       cleared && `Bonus dice cleared — ${cleared}.`,
     ].filter(Boolean);
@@ -690,18 +707,6 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
 
   static async #awardMidGameBreak() {
     await awardMidGameBreakHeroPoints();
-    this.render({ force: true });
-  }
-
-  static async #changeMythic(event, target) {
-    const actor = game.actors.get(target.dataset.actorId);
-    const resource = mythicResource(actor);
-    if (!actor || !resource) return;
-    const delta = Number(target.dataset.delta) || 0;
-    const value = clamp((Number(resource.value) || 0) + delta, 0, resource.max);
-    if (value === resource.value) return;
-    await actor.update({ "system.resources.mythicPoints.value": value });
-    await announce(`<p><strong>Mythic Points:</strong> ${actor.name} ${delta > 0 ? "gains" : "spends"} 1 Mythic Point (${value} / ${resource.max}).</p>`);
     this.render({ force: true });
   }
 
