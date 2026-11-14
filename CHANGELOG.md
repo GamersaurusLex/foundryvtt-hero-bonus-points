@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.8
+
+- Added a scene-aware **Recall Knowledge** picker that lets the user choose the
+  subject and target before invoking PF2e Workbench's standard Recall Knowledge
+  workflow.
+- Players can select only tokens they own; the GM can select any eligible scene
+  token. A new world setting can exclude Dead or Unconscious actors.
+- Added a GM-only Recall Knowledge Queue that records player-selected subjects
+  and targets for quick review and focus.
+
 ## 0.1.7
 
 - Mythic Point changes in the award panel now stage alongside Hero Points and bonus dice, then apply in one batch with a single public session-award summary.

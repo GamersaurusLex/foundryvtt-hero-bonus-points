@@ -4,6 +4,10 @@ const CRITICAL_INITIATIVE_FLAG = "criticalInitiative";
 const ORACULAR_WARNING_FLAG = "oracularWarning";
 const RETRIBUTIVE_STRIKE_FLAG = "retributiveStrike";
 const RETRIBUTIVE_STRIKE_SOCKET = `module.${MODULE_ID}`;
+const RECALL_KNOWLEDGE_QUEUE_SETTING = "recallKnowledgeQueue";
+const RECALL_KNOWLEDGE_USER_QUEUE_FLAG = "recallKnowledgeRequests";
+const RECALL_KNOWLEDGE_PACK = "xdy-pf2e-workbench.asymonous-benefactor-macros-internal";
+const RECALL_KNOWLEDGE_MACRO = "XDY DO_NOT_IMPORT Recall_Knowledge";
 const ORACULAR_WARNING_UUIDS = {
   effect: "Compendium.pf2e.feat-effects.Item.7XxZ4YJ6c97D9Fc9",
   initiative: "Compendium.pf2e.feat-effects.Item.ETZHTCjlOUHHSE0Z"
@@ -19,6 +23,7 @@ const breaktimeRenderListeners = new WeakSet();
 const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const spending = new Set();
+let recallKnowledgeQueueApp = null;
 
 function bonusDiceEnabled() {
   return game.settings.get(MODULE_ID, "bonusDice");
@@ -712,6 +717,254 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
 
 }
 
+function recallKnowledgeExcludesIncapacitated() {
+  return game.settings.get(MODULE_ID, "recallKnowledgeExcludeIncapacitated");
+}
+
+function isDeadOrUnconscious(actor) {
+  return ["dead", "unconscious"].some((slug) => actor?.items?.some((item) => item.type === "condition" && item.slug === slug));
+}
+
+function recallKnowledgeSceneTokens() {
+  if (!canvas?.ready || !canvas.scene) return [];
+  return canvas.tokens.placeables.filter((token) => {
+    if (!token.actor) return false;
+    return !recallKnowledgeExcludesIncapacitated() || !isDeadOrUnconscious(token.actor);
+  });
+}
+
+function canUseRecallKnowledgeSubject(token) {
+  return game.user.isGM || token.actor?.isOwner;
+}
+
+function recallKnowledgeTokenData(token) {
+  return {
+    id: token.id,
+    actorId: token.actor?.id ?? null,
+    name: token.name || token.actor?.name || "Unnamed token",
+    img: token.document?.texture?.src || token.actor?.img || "icons/svg/mystery-man.svg"
+  };
+}
+
+function escapeRecallKnowledgeHTML(value) {
+  return foundry.utils.escapeHTML(String(value ?? ""));
+}
+
+function recallKnowledgeTokenOptions(tokens, selectedId, { includeNone = false } = {}) {
+  const options = includeNone ? ['<option value="">No target selected</option>'] : [];
+  options.push(...tokens.map((token) => {
+    const selected = token.id === selectedId ? " selected" : "";
+    return `<option value="${escapeRecallKnowledgeHTML(token.id)}"${selected}>${escapeRecallKnowledgeHTML(token.name || token.actor?.name || "Unnamed token")}</option>`;
+  }));
+  return options.join("");
+}
+
+function recallKnowledgePreview(token, label, { empty = false } = {}) {
+  const name = empty ? "No target selected" : (token?.name || token?.actor?.name || "No token selected");
+  const img = empty ? "icons/svg/book.svg" : (token?.document?.texture?.src || token?.actor?.img || "icons/svg/mystery-man.svg");
+  return `
+    <article class="recall-knowledge-preview" data-rk-preview="${label}">
+      <img src="${escapeRecallKnowledgeHTML(img)}" alt="">
+      <div>
+        <span>${label === "subject" ? "Making the check" : "Checking knowledge about"}</span>
+        <strong>${escapeRecallKnowledgeHTML(name)}</strong>
+      </div>
+    </article>`;
+}
+
+function selectedRecallKnowledgeSubject(subjects) {
+  const controlled = canvas.tokens.controlled.find((token) => subjects.some((candidate) => candidate.id === token.id));
+  return controlled ?? subjects[0] ?? null;
+}
+
+function selectedRecallKnowledgeTarget(targets) {
+  const target = [...game.user.targets].find((token) => targets.some((candidate) => candidate.id === token.id));
+  return target ?? null;
+}
+
+function updateRecallKnowledgePreviews(form, subjects, targets) {
+  const refresh = () => {
+    const subject = subjects.find((token) => token.id === form.elements.subjectTokenId?.value) ?? null;
+    const target = targets.find((token) => token.id === form.elements.targetTokenId?.value) ?? null;
+    for (const [kind, token] of [["subject", subject], ["target", target]]) {
+      const preview = form.querySelector(`[data-rk-preview="${kind}"]`);
+      if (!preview) continue;
+      const image = preview.querySelector("img");
+      const name = preview.querySelector("strong");
+      if (image) image.src = token?.document?.texture?.src || token?.actor?.img || (kind === "target" ? "icons/svg/book.svg" : "icons/svg/mystery-man.svg");
+      if (name) name.textContent = token?.name || token?.actor?.name || (kind === "target" ? "No target selected" : "No token selected");
+    }
+  };
+  form.elements.subjectTokenId?.addEventListener("change", refresh);
+  form.elements.targetTokenId?.addEventListener("change", refresh);
+  refresh();
+}
+
+async function chooseRecallKnowledgeTokens() {
+  const tokens = recallKnowledgeSceneTokens();
+  const subjects = tokens.filter(canUseRecallKnowledgeSubject);
+  if (!subjects.length) {
+    return ui.notifications.warn(game.user.isGM
+      ? "There are no eligible actor tokens on this scene."
+      : "You do not own an eligible actor token on this scene.");
+  }
+  const subject = selectedRecallKnowledgeSubject(subjects);
+  const target = selectedRecallKnowledgeTarget(tokens);
+  return foundry.applications.api.DialogV2.wait({
+    window: { title: "Recall Knowledge" },
+    classes: [MODULE_ID, "recall-knowledge-dialog"],
+    position: { width: 560 },
+    content: `
+      <p class="hint">Choose who is recalling knowledge and, when relevant, what they are recalling knowledge about.</p>
+      <div class="recall-knowledge-previews">
+        ${recallKnowledgePreview(subject, "subject")}
+        ${recallKnowledgePreview(target, "target", { empty: !target })}
+      </div>
+      <div class="form-group">
+        <label>Subject</label>
+        <div class="form-fields"><select name="subjectTokenId">${recallKnowledgeTokenOptions(subjects, subject?.id)}</select></div>
+      </div>
+      <div class="form-group">
+        <label>Target</label>
+        <div class="form-fields"><select name="targetTokenId">${recallKnowledgeTokenOptions(tokens, target?.id, { includeNone: true })}</select></div>
+      </div>`,
+    buttons: [
+      {
+        action: "recall",
+        label: "Recall Knowledge",
+        icon: "fa-solid fa-book-open-reader",
+        default: true,
+        callback: (_event, button) => ({
+          subjectTokenId: button.form.elements.subjectTokenId?.value,
+          targetTokenId: button.form.elements.targetTokenId?.value || null
+        })
+      },
+      { action: "cancel", label: "Cancel", icon: "fa-solid fa-xmark", callback: () => null }
+    ],
+    render: (_event, dialog) => updateRecallKnowledgePreviews(dialog.element.querySelector("form"), subjects, tokens)
+  });
+}
+
+function recallKnowledgeRequests() {
+  return game.settings.get(MODULE_ID, RECALL_KNOWLEDGE_QUEUE_SETTING) ?? [];
+}
+
+async function setRecallKnowledgeRequests(requests) {
+  await game.settings.set(MODULE_ID, RECALL_KNOWLEDGE_QUEUE_SETTING, requests);
+}
+
+async function appendRecallKnowledgeRequest(request) {
+  if (!isActiveGM()) return;
+  await setRecallKnowledgeRequests([...recallKnowledgeRequests(), request]);
+  if (!recallKnowledgeQueueApp?.rendered) recallKnowledgeQueueApp = new RecallKnowledgeQueue();
+  recallKnowledgeQueueApp.render({ force: true });
+}
+
+async function queueRecallKnowledgeRequest(subject, target) {
+  if (game.user.isGM) return;
+  const request = {
+    id: foundry.utils.randomID(),
+    sceneId: canvas.scene?.id ?? null,
+    createdAt: Date.now(),
+    userId: game.user.id,
+    userName: game.user.name,
+    subject: recallKnowledgeTokenData(subject),
+    target: target ? recallKnowledgeTokenData(target) : null
+  };
+  const requests = game.user.getFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG) ?? [];
+  await game.user.setFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG, [...requests, request]);
+}
+
+async function collectRecallKnowledgeRequests(user, requests = user.getFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG)) {
+  if (!isActiveGM() || !Array.isArray(requests) || !requests.length) return;
+  const existingIds = new Set(recallKnowledgeRequests().map((request) => request.id));
+  const newRequests = requests.filter((request) => request?.id && !existingIds.has(request.id));
+  for (const request of newRequests) await appendRecallKnowledgeRequest(request);
+  const processedIds = new Set(requests.filter((request) => request?.id).map((request) => request.id));
+  const current = user.getFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG) ?? [];
+  await user.setFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG, current.filter((request) => !processedIds.has(request?.id)));
+}
+
+function setRecallKnowledgeTarget(target) {
+  canvas.tokens.setTargets(target ? [target.id] : [], { mode: "replace" });
+}
+
+async function focusRecallKnowledgeRequest(request) {
+  if (request.sceneId !== canvas.scene?.id) return ui.notifications.warn("Open the request's scene before focusing its tokens.");
+  const subject = canvas.tokens.get(request.subject?.id);
+  const target = request.target ? canvas.tokens.get(request.target.id) : null;
+  subject?.control({ releaseOthers: true });
+  setRecallKnowledgeTarget(target);
+  if (subject) canvas.animatePan({ x: subject.center.x, y: subject.center.y, duration: 250 });
+}
+
+class RecallKnowledgeQueue extends HandlebarsApplicationMixin(ApplicationV2) {
+  static DEFAULT_OPTIONS = {
+    id: `${MODULE_ID}-recall-knowledge-queue`,
+    classes: [MODULE_ID],
+    position: { width: 720, height: 520 },
+    window: { title: "Recall Knowledge Queue", icon: "fa-solid fa-book-open-reader", resizable: true },
+    actions: {
+      "focus-request": RecallKnowledgeQueue.#focusRequest,
+      "dismiss-request": RecallKnowledgeQueue.#dismissRequest,
+      "clear-requests": RecallKnowledgeQueue.#clearRequests
+    }
+  };
+
+  static PARTS = { queue: { template: `modules/${MODULE_ID}/templates/recall-knowledge-queue.hbs`, root: true, scrollable: [".recall-knowledge-request-list"] } };
+
+  get title() { return "Recall Knowledge Queue"; }
+
+  async _prepareContext(options) {
+    const requests = recallKnowledgeRequests().map((request) => ({
+      ...request,
+      targetName: request.target?.name ?? "No target selected",
+      targetImg: request.target?.img ?? "icons/svg/book.svg",
+      createdAtLabel: new Date(request.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    }));
+    return { ...await super._prepareContext(options), requests, hasRequests: requests.length > 0 };
+  }
+
+  static async #focusRequest(_event, target) {
+    const request = recallKnowledgeRequests().find((entry) => entry.id === target.dataset.requestId);
+    if (request) await focusRecallKnowledgeRequest(request);
+  }
+
+  static async #dismissRequest(_event, target) {
+    await setRecallKnowledgeRequests(recallKnowledgeRequests().filter((entry) => entry.id !== target.dataset.requestId));
+  }
+
+  static async #clearRequests() {
+    const confirmed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: "Clear Recall Knowledge Queue" },
+      content: "<p>Clear every pending Recall Knowledge request from this queue?</p>",
+      yes: { label: "Clear Queue", icon: "fa-solid fa-trash" }
+    });
+    if (confirmed) await setRecallKnowledgeRequests([]);
+  }
+}
+
+async function invokeWorkbenchRecallKnowledge() {
+  const pack = game.packs.get(RECALL_KNOWLEDGE_PACK);
+  if (!pack) return ui.notifications.error("PF2e Workbench's Recall Knowledge macro is unavailable. Enable PF2e Workbench first.");
+  const [macro] = await pack.getDocuments({ name: RECALL_KNOWLEDGE_MACRO });
+  if (!macro) return ui.notifications.error("PF2e Workbench's Recall Knowledge macro could not be found.");
+  return macro.execute({ event: new Event("click") });
+}
+
+async function openRecallKnowledge() {
+  const choice = await chooseRecallKnowledgeTokens();
+  if (!choice?.subjectTokenId) return;
+  const tokens = recallKnowledgeSceneTokens();
+  const subject = tokens.find((token) => token.id === choice.subjectTokenId);
+  const target = choice.targetTokenId ? tokens.find((token) => token.id === choice.targetTokenId) : null;
+  if (!subject || !canUseRecallKnowledgeSubject(subject)) return ui.notifications.warn("That subject is no longer available for Recall Knowledge.");
+  subject.control({ releaseOthers: true });
+  setRecallKnowledgeTarget(target);
+  await queueRecallKnowledgeRequest(subject, target);
+  return invokeWorkbenchRecallKnowledge();
+}
+
 function injectBonusReadout(app, element) {
   const actor = app.actor ?? app.document;
   if (!actor?.isOwner || actor.type !== "character") return;
@@ -959,12 +1212,34 @@ Hooks.once("init", () => {
     type: Boolean,
     default: false,
   });
+  game.settings.register(MODULE_ID, "recallKnowledgeExcludeIncapacitated", {
+    name: "Recall Knowledge: Exclude Dead or Unconscious Tokens",
+    hint: "Hides scene tokens with the Dead or Unconscious condition from Recall Knowledge's subject and target pickers.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true
+  });
+  game.settings.register(MODULE_ID, RECALL_KNOWLEDGE_QUEUE_SETTING, {
+    scope: "world",
+    config: false,
+    type: Array,
+    default: []
+  });
   game.settings.registerMenu(MODULE_ID, "awardPanel", {
     name: "Hero Points, Mythic Points, and Bonus Dice",
     label: "Open Award Panel",
     hint: "Set session Hero Points and award Hero, Mythic, and bonus-die resources.",
     icon: "fa-solid fa-star",
     type: AwardPanel,
+    restricted: true
+  });
+  game.settings.registerMenu(MODULE_ID, "recallKnowledgeQueue", {
+    name: "Recall Knowledge Queue",
+    label: "Open Recall Knowledge Queue",
+    hint: "Review player-generated Recall Knowledge checks, including their selected subject and target.",
+    icon: "fa-solid fa-book-open-reader",
+    type: RecallKnowledgeQueue,
     restricted: true
   });
 });
@@ -1018,7 +1293,14 @@ function registerBreakTimeIntegration() {
 }
 
 Hooks.once("ready", () => {
-  game.modules.get(MODULE_ID).api = { open: () => new AwardPanel().render({ force: true }) };
+  game.modules.get(MODULE_ID).api = {
+    open: () => new AwardPanel().render({ force: true }),
+    recallKnowledge: () => openRecallKnowledge(),
+    recallKnowledgeQueue: () => {
+      recallKnowledgeQueueApp ??= new RecallKnowledgeQueue();
+      return recallKnowledgeQueueApp.render({ force: true });
+    }
+  };
   game.socket.on(RETRIBUTIVE_STRIKE_SOCKET, async (payload) => {
     if (payload?.type === "retributive-strike-request" && isActiveGM()) {
       const response = await resolveRetributiveStrike(payload).catch((error) => ({ error: error.message ?? "Retributive Strike could not be resolved." }));
@@ -1031,6 +1313,17 @@ Hooks.once("ready", () => {
   registerBreakTimeIntegration();
   void removeLegacyCriticalInitiativeEffects();
   if (game.settings.get(MODULE_ID, "dynamicStride")) void ensureDynamicStride();
+  if (isActiveGM()) void Promise.all(game.users.map((user) => collectRecallKnowledgeRequests(user)));
+});
+
+Hooks.on("updateUser", (user, changes) => {
+  const requests = changes.flags?.[MODULE_ID]?.[RECALL_KNOWLEDGE_USER_QUEUE_FLAG];
+  if (requests !== undefined) void collectRecallKnowledgeRequests(user, requests);
+});
+
+Hooks.on("updateSetting", (setting) => {
+  if (setting.key !== `${MODULE_ID}.${RECALL_KNOWLEDGE_QUEUE_SETTING}` || !recallKnowledgeQueueApp?.rendered) return;
+  recallKnowledgeQueueApp.render({ force: true });
 });
 
 Hooks.on("pf2e-toolbelt.preUsePhysicalItem", (context) => {

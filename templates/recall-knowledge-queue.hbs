@@ -1,0 +1,35 @@
+<section class="recall-knowledge-queue">
+  <header class="recall-knowledge-queue-header">
+    <div>
+      <h2>Player Recall Knowledge Checks</h2>
+      <p>Verify the subject and target before you resolve the pile of checks.</p>
+    </div>
+    {{#if hasRequests}}
+      <button type="button" data-action="clear-requests"><i class="fa-solid fa-trash"></i> Clear Queue</button>
+    {{/if}}
+  </header>
+
+  {{#if hasRequests}}
+    <ol class="recall-knowledge-request-list">
+      {{#each requests}}
+        <li class="recall-knowledge-request" data-request-id="{{id}}">
+          <div class="recall-knowledge-request-portraits">
+            <img src="{{subject.img}}" alt="">
+            <i class="fa-solid fa-arrow-right"></i>
+            <img src="{{targetImg}}" alt="">
+          </div>
+          <div class="recall-knowledge-request-details">
+            <strong>{{userName}}</strong> requested Recall Knowledge as <b>{{subject.name}}</b> about <b>{{targetName}}</b>.
+            <span>{{createdAtLabel}}</span>
+          </div>
+          <div class="recall-knowledge-request-actions">
+            <button type="button" data-action="focus-request" data-request-id="{{id}}"><i class="fa-solid fa-crosshairs"></i> Focus</button>
+            <button type="button" data-action="dismiss-request" data-request-id="{{id}}" data-tooltip="Remove from queue" aria-label="Remove from queue"><i class="fa-solid fa-check"></i></button>
+          </div>
+        </li>
+      {{/each}}
+    </ol>
+  {{else}}
+    <p class="recall-knowledge-empty">No player Recall Knowledge checks are waiting. Their requests will appear here as they make them.</p>
+  {{/if}}
+</section>

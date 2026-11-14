@@ -111,6 +111,21 @@ test("held bonus dice use a compact, legible badge beside Hero Points", async ()
   assert.match(source, /anchor\.insertAdjacentElement\("afterend", readout\)/);
 });
 
+test("Recall Knowledge uses scene-aware v14 token targeting and the GM review queue", async () => {
+  const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
+  assert.match(source, /"recallKnowledgeExcludeIncapacitated"/);
+  assert.match(source, /"recallKnowledgeQueue"/);
+  assert.match(source, /"recallKnowledgeRequests"/);
+  assert.match(source, /XDY DO_NOT_IMPORT Recall_Knowledge/);
+  assert.match(source, /class RecallKnowledgeQueue/);
+  assert.match(source, /token\.actor\?\.isOwner/);
+  assert.match(source, /\["dead", "unconscious"\]/);
+  assert.match(source, /canvas\.tokens\.setTargets\(target \? \[target\.id\] : \[\], \{ mode: "replace" \}\)/);
+  assert.match(source, /game\.user\.setFlag\(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG/);
+  assert.match(source, /Hooks\.on\("updateUser"/);
+  assert.doesNotMatch(source, /game\.user\.updateTokenTargets/);
+});
+
 test("Careful Consumption intercepts only Toolbelt healing-consumable uses", async () => {
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
   assert.match(source, /pf2e-toolbelt\.preUsePhysicalItem/);
