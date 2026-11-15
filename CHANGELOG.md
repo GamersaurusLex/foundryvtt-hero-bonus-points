@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9
+
+- Recall Knowledge now reliably controls the selected subject token and updates
+  the user's target before invoking PF2e Workbench's standard workflow.
+
 ## 0.1.8
 
 - Added a scene-aware **Recall Knowledge** picker that lets the user choose the

@@ -889,6 +889,14 @@ function setRecallKnowledgeTarget(target) {
   canvas.tokens.setTargets(target ? [target.id] : [], { mode: "replace" });
 }
 
+function selectRecallKnowledgeSubject(subject) {
+  for (const selected of canvas.tokens.controlled) {
+    if (selected !== subject) selected.release();
+  }
+  if (!subject.controlled && !subject.control({ pan: false })) return false;
+  return canvas.tokens.controlled.includes(subject);
+}
+
 async function focusRecallKnowledgeRequest(request) {
   if (request.sceneId !== canvas.scene?.id) return ui.notifications.warn("Open the request's scene before focusing its tokens.");
   const subject = canvas.tokens.get(request.subject?.id);
@@ -959,9 +967,10 @@ async function openRecallKnowledge() {
   const subject = tokens.find((token) => token.id === choice.subjectTokenId);
   const target = choice.targetTokenId ? tokens.find((token) => token.id === choice.targetTokenId) : null;
   if (!subject || !canUseRecallKnowledgeSubject(subject)) return ui.notifications.warn("That subject is no longer available for Recall Knowledge.");
-  subject.control({ releaseOthers: true });
+  if (!selectRecallKnowledgeSubject(subject)) return ui.notifications.warn("Foundry could not select that token for Recall Knowledge.");
   setRecallKnowledgeTarget(target);
   await queueRecallKnowledgeRequest(subject, target);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
   return invokeWorkbenchRecallKnowledge();
 }
 
