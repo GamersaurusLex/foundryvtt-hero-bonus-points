@@ -8,6 +8,9 @@ const RECALL_KNOWLEDGE_QUEUE_SETTING = "recallKnowledgeQueue";
 const RECALL_KNOWLEDGE_USER_QUEUE_FLAG = "recallKnowledgeRequests";
 const RECALL_KNOWLEDGE_PACK = "xdy-pf2e-workbench.asymonous-benefactor-macros-internal";
 const RECALL_KNOWLEDGE_MACRO = "XDY DO_NOT_IMPORT Recall_Knowledge";
+const BESTIARY_TRACKER_MODULE_ID = "pf2e-bestiary-tracking";
+const BESTIARY_TRACKER_SOCKET = `module.${BESTIARY_TRACKER_MODULE_ID}`;
+const BESTIARY_TRACKER_UPDATE_HOOK = "UpdateBestiary";
 const ORACULAR_WARNING_UUIDS = {
   effect: "Compendium.pf2e.feat-effects.Item.7XxZ4YJ6c97D9Fc9",
   initiative: "Compendium.pf2e.feat-effects.Item.ETZHTCjlOUHHSE0Z"
@@ -24,6 +27,7 @@ const { ApplicationV2, HandlebarsApplicationMixin } = foundry.applications.api;
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const spending = new Set();
 let recallKnowledgeQueueApp = null;
+let recallKnowledgeTrackerWarningFingerprint = null;
 
 function bonusDiceEnabled() {
   return game.settings.get(MODULE_ID, "bonusDice");
@@ -738,11 +742,133 @@ function canUseRecallKnowledgeSubject(token) {
 }
 
 function recallKnowledgeTokenData(token) {
+  const actor = token.actor;
+  const baseActor = actor?.baseActor ?? actor;
   return {
     id: token.id,
-    actorId: token.actor?.id ?? null,
-    name: token.name || token.actor?.name || "Unnamed token",
-    img: token.document?.texture?.src || token.actor?.img || "icons/svg/mystery-man.svg"
+    actorId: actor?.id ?? null,
+    actorUuid: baseActor?.uuid ?? actor?.uuid ?? null,
+    name: token.name || actor?.name || "Unnamed token",
+    img: token.document?.texture?.src || actor?.img || "icons/svg/mystery-man.svg"
+  };
+}
+
+function bestiaryTrackerActive() {
+  return game.modules.get(BESTIARY_TRACKER_MODULE_ID)?.active === true;
+}
+
+function bestiaryTrackerVagueDescriptions() {
+  if (!bestiaryTrackerActive()) return null;
+  return game.settings.get(BESTIARY_TRACKER_MODULE_ID, "vague-descriptions");
+}
+
+function bestiaryTrackerReadiness() {
+  const settings = bestiaryTrackerVagueDescriptions();
+  if (!settings) return { active: false, ready: false, message: "PF2E Bestiary Tracking is not active." };
+  const savesVague = settings.properties?.saves === true;
+  const comparativeSaves = settings.settings?.simpleSaves === true;
+  const missing = [];
+  if (!savesVague) missing.push("Vague Descriptions → Saves");
+  if (!comparativeSaves) missing.push("Vague Descriptions → Comparative Save Descriptions");
+  return {
+    active: true,
+    ready: missing.length === 0,
+    message: missing.length
+      ? `Bestiary Tracker save reveals are unavailable until you enable ${missing.join(" and ")}.`
+      : null
+  };
+}
+
+function warnBestiaryTrackerReadiness() {
+  if (!isActiveGM() || !bestiaryTrackerActive()) return;
+  const readiness = bestiaryTrackerReadiness();
+  const fingerprint = readiness.ready ? "ready" : readiness.message;
+  if (readiness.ready || recallKnowledgeTrackerWarningFingerprint === fingerprint) return;
+  recallKnowledgeTrackerWarningFingerprint = fingerprint;
+  ui.notifications.warn(`${readiness.message} Open PF2E Bestiary Tracking's Vague Descriptions settings to fix it.`);
+}
+
+function localizedTrackerValue(value) {
+  if (!value) return "Unknown";
+  const localized = game.i18n.localize(value);
+  return localized === value ? String(value).replace(/\b\w/g, (letter) => letter.toUpperCase()) : localized;
+}
+
+function saveRelativeDescription(key, saves) {
+  const entries = Object.entries(saves ?? {}).filter(([, save]) => Number.isFinite(Number(save?.value)));
+  const current = saves?.[key];
+  if (!current || !entries.length) return "unknown";
+  const value = Number(current.value);
+  const values = entries.map(([, save]) => Number(save.value));
+  const highest = Math.max(...values);
+  const lowest = Math.min(...values);
+  if (highest === lowest) return "equal to its other saves";
+  const highestCount = values.filter((candidate) => candidate === highest).length;
+  const lowestCount = values.filter((candidate) => candidate === lowest).length;
+  if (value === highest) return highestCount > 1 ? "tied for its highest save" : "its highest save";
+  if (value === lowest) return lowestCount > 1 ? "tied for its lowest save" : "its lowest save";
+  return "neither its highest nor lowest save";
+}
+
+function trackerPageForRecallKnowledgeTarget(target) {
+  if (!bestiaryTrackerActive() || !target?.actorUuid) return null;
+  const journalId = game.settings.get(BESTIARY_TRACKER_MODULE_ID, "bestiary-tracking");
+  const journal = game.journal.get(journalId);
+  return journal?.pages.find((page) => page.system?.uuid === target.actorUuid) ?? null;
+}
+
+function trackerIWRChoices(page, property, label) {
+  const entries = Object.entries(page.system?.[property] ?? {});
+  if (!entries.length) {
+    return [{
+      key: `none-${property}`,
+      path: null,
+      label: `No ${property}`,
+      cardLabel: `No ${property}`,
+      known: false
+    }];
+  }
+  return entries
+    .map(([key, entry]) => {
+      const value = localizedTrackerValue(entry.customLabel || entry.type || key);
+      const amount = property === "immunities" || entry.value == null ? "" : ` ${entry.value}`;
+      return {
+        key: `${property}-${key}`,
+        path: `system.${property}.${key}.revealed`,
+        label: `${label}: ${value}`,
+        cardLabel: `${label}: ${value}${amount}`,
+        known: entry.revealed === true
+      };
+    })
+    .sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function trackerChoicesForRecallKnowledgeTarget(target) {
+  const page = trackerPageForRecallKnowledgeTarget(target);
+  if (!page) return { page: null, choices: [], error: "No matching Bestiary Tracker entry exists for this target yet." };
+  const readiness = bestiaryTrackerReadiness();
+  const saveChoices = readiness.ready
+    ? Object.entries(page.system?.saves ?? {}).map(([key, save]) => {
+      const name = ({ fortitude: "Fortitude", reflex: "Reflex", will: "Will" })[key] ?? localizedTrackerValue(key);
+      const description = saveRelativeDescription(key, page.system.saves);
+      return {
+        key: `save-${key}`,
+        path: `system.saves.${key}.revealed`,
+        label: `${name} — ${description}`,
+        cardLabel: `${name} is ${description}.`,
+        known: save.revealed === true
+      };
+    })
+    : [];
+  return {
+    page,
+    choices: [
+      ...saveChoices,
+      ...trackerIWRChoices(page, "immunities", "Immunity"),
+      ...trackerIWRChoices(page, "resistances", "Resistance"),
+      ...trackerIWRChoices(page, "weaknesses", "Weakness")
+    ],
+    error: readiness.ready ? null : readiness.message
   };
 }
 
@@ -856,12 +982,12 @@ async function setRecallKnowledgeRequests(requests) {
 async function appendRecallKnowledgeRequest(request) {
   if (!isActiveGM()) return;
   await setRecallKnowledgeRequests([...recallKnowledgeRequests(), request]);
+  warnBestiaryTrackerReadiness();
   if (!recallKnowledgeQueueApp?.rendered) recallKnowledgeQueueApp = new RecallKnowledgeQueue();
   recallKnowledgeQueueApp.render({ force: true });
 }
 
 async function queueRecallKnowledgeRequest(subject, target) {
-  if (game.user.isGM) return;
   const request = {
     id: foundry.utils.randomID(),
     sceneId: canvas.scene?.id ?? null,
@@ -871,6 +997,7 @@ async function queueRecallKnowledgeRequest(subject, target) {
     subject: recallKnowledgeTokenData(subject),
     target: target ? recallKnowledgeTokenData(target) : null
   };
+  if (game.user.isGM) return appendRecallKnowledgeRequest(request);
   const requests = game.user.getFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG) ?? [];
   await game.user.setFlag(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG, [...requests, request]);
 }
@@ -906,6 +1033,97 @@ async function focusRecallKnowledgeRequest(request) {
   if (subject) canvas.animatePan({ x: subject.center.x, y: subject.center.y, duration: 250 });
 }
 
+function recallKnowledgeChoiceLimit(outcome) {
+  if (outcome === "success") return 1;
+  if (outcome === "criticalSuccess") return 2;
+  return 0;
+}
+
+function recallKnowledgeOutcomeLabel(outcome) {
+  return ({ failure: "Failure", success: "Success", criticalSuccess: "Critical Success" })[outcome] ?? "";
+}
+
+function queueRoot(target) {
+  return target.closest(".recall-knowledge-queue");
+}
+
+function selectedRecallKnowledgeChoices(root, requestId) {
+  const request = recallKnowledgeRequests().find((entry) => entry.id === requestId);
+  const tracker = trackerChoicesForRecallKnowledgeTarget(request?.target);
+  const selected = Array.from(root.querySelectorAll("[data-rk-choice]:checked"))
+    .filter((input) => input.dataset.requestId === requestId);
+  return selected.map((input) => tracker.choices.find((choice) => choice.key === input.dataset.choiceKey)).filter(Boolean);
+}
+
+async function notifyBestiaryTrackerUpdated() {
+  await game.socket.emit(BESTIARY_TRACKER_SOCKET, { action: BESTIARY_TRACKER_UPDATE_HOOK, data: {} });
+  Hooks.callAll(BESTIARY_TRACKER_UPDATE_HOOK, {});
+}
+
+async function postRecallKnowledgeRevealCards(reveals) {
+  for (const reveal of reveals) {
+    const contributors = [...new Set(reveal.requests.map((request) => request.subject?.name).filter(Boolean))];
+    const contributorText = contributors.length ? `<p>${contributors.map((name) => escapeRecallKnowledgeHTML(name)).join(", ")} ${contributors.length === 1 ? "learns" : "learn"}:</p>` : "";
+    const facts = reveal.choices.map((choice) => `<li>${escapeRecallKnowledgeHTML(choice.cardLabel)}</li>`).join("");
+    await ChatMessage.create({
+      content: `<section class="lex-recall-knowledge-reveal"><h3>Recall Knowledge: ${escapeRecallKnowledgeHTML(reveal.page.name)}</h3>${contributorText}<ul>${facts}</ul></section>`
+    });
+  }
+}
+
+async function applyRecallKnowledgeTrackerReveals(root) {
+  if (!bestiaryTrackerActive()) return ui.notifications.warn("PF2E Bestiary Tracking is not active.");
+  const pending = recallKnowledgeRequests();
+  const requestsById = new Map(pending.map((request) => [request.id, request]));
+  const selections = [];
+  const completedIds = new Set();
+  const selectedPaths = new Set();
+
+  for (const outcomeInput of root.querySelectorAll("[data-rk-outcome]")) {
+    const outcome = outcomeInput.value;
+    if (!outcome) continue;
+    const request = requestsById.get(outcomeInput.dataset.requestId);
+    if (!request) continue;
+    if (outcome === "failure") {
+      completedIds.add(request.id);
+      continue;
+    }
+    const limit = recallKnowledgeChoiceLimit(outcome);
+    const tracker = trackerChoicesForRecallKnowledgeTarget(request.target);
+    if (!tracker.page) return ui.notifications.warn(`${request.target?.name ?? "That target"}: ${tracker.error}`);
+    const choices = selectedRecallKnowledgeChoices(root, request.id);
+    if (choices.length !== limit) return ui.notifications.warn(`${request.subject.name} → ${request.target.name}: ${recallKnowledgeOutcomeLabel(outcome)} requires ${limit} ${limit === 1 ? "selection" : "selections"}.`);
+    for (const choice of choices) {
+      if (choice.known) return ui.notifications.warn(`${choice.label} is already revealed in Bestiary Tracker.`);
+      const uniqueKey = `${tracker.page.id}:${choice.path ?? choice.key}`;
+      if (selectedPaths.has(uniqueKey)) return ui.notifications.warn(`${choice.label} was selected twice in this batch.`);
+      selectedPaths.add(uniqueKey);
+      selections.push({ request, page: tracker.page, choice });
+    }
+    completedIds.add(request.id);
+  }
+
+  if (!completedIds.size) return ui.notifications.info("Choose an outcome for at least one Recall Knowledge request first.");
+  const revealGroups = new Map();
+  for (const selection of selections) {
+    const group = revealGroups.get(selection.page.id) ?? { page: selection.page, choices: [], requests: [] };
+    group.choices.push(selection.choice);
+    group.requests.push(selection.request);
+    revealGroups.set(selection.page.id, group);
+  }
+  for (const { page, choices } of revealGroups.values()) {
+    const update = {};
+    for (const choice of choices) {
+      if (choice.path) foundry.utils.setProperty(update, choice.path, true);
+    }
+    if (Object.keys(update).length) await page.update(update);
+  }
+  if (revealGroups.size) await notifyBestiaryTrackerUpdated();
+  if (root.querySelector("[data-rk-post-chat]")?.checked && revealGroups.size) await postRecallKnowledgeRevealCards([...revealGroups.values()]);
+  await setRecallKnowledgeRequests(pending.filter((request) => !completedIds.has(request.id)));
+  ui.notifications.info(`Resolved ${completedIds.size} Recall Knowledge ${completedIds.size === 1 ? "request" : "requests"}.`);
+}
+
 class RecallKnowledgeQueue extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-recall-knowledge-queue`,
@@ -915,7 +1133,8 @@ class RecallKnowledgeQueue extends HandlebarsApplicationMixin(ApplicationV2) {
     actions: {
       "focus-request": RecallKnowledgeQueue.#focusRequest,
       "dismiss-request": RecallKnowledgeQueue.#dismissRequest,
-      "clear-requests": RecallKnowledgeQueue.#clearRequests
+      "clear-requests": RecallKnowledgeQueue.#clearRequests,
+      "apply-tracker-reveals": RecallKnowledgeQueue.#applyTrackerReveals
     }
   };
 
@@ -924,13 +1143,20 @@ class RecallKnowledgeQueue extends HandlebarsApplicationMixin(ApplicationV2) {
   get title() { return "Recall Knowledge Queue"; }
 
   async _prepareContext(options) {
-    const requests = recallKnowledgeRequests().map((request) => ({
-      ...request,
-      targetName: request.target?.name ?? "No target selected",
-      targetImg: request.target?.img ?? "icons/svg/book.svg",
-      createdAtLabel: new Date(request.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    }));
-    return { ...await super._prepareContext(options), requests, hasRequests: requests.length > 0 };
+    const tracker = bestiaryTrackerReadiness();
+    const requests = recallKnowledgeRequests().map((request) => {
+      const targetTracker = tracker.active ? trackerChoicesForRecallKnowledgeTarget(request.target) : null;
+      return {
+        ...request,
+        targetName: request.target?.name ?? "No target selected",
+        targetImg: request.target?.img ?? "icons/svg/book.svg",
+        createdAtLabel: new Date(request.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        trackerPageId: targetTracker?.page?.id ?? null,
+        trackerChoices: targetTracker?.choices ?? [],
+        trackerError: targetTracker?.error ?? (tracker.active ? null : "PF2E Bestiary Tracking is not active.")
+      };
+    });
+    return { ...await super._prepareContext(options), requests, hasRequests: requests.length > 0, tracker };
   }
 
   static async #focusRequest(_event, target) {
@@ -950,6 +1176,11 @@ class RecallKnowledgeQueue extends HandlebarsApplicationMixin(ApplicationV2) {
     });
     if (confirmed) await setRecallKnowledgeRequests([]);
   }
+
+  static async #applyTrackerReveals(_event, target) {
+    const root = queueRoot(target);
+    if (root) await applyRecallKnowledgeTrackerReveals(root);
+  }
 }
 
 async function invokeWorkbenchRecallKnowledge() {
@@ -961,6 +1192,7 @@ async function invokeWorkbenchRecallKnowledge() {
 }
 
 async function openRecallKnowledge() {
+  warnBestiaryTrackerReadiness();
   const choice = await chooseRecallKnowledgeTokens();
   if (!choice?.subjectTokenId) return;
   const tokens = recallKnowledgeSceneTokens();

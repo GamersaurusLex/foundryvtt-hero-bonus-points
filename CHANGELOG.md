@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- Added GM-batched **Bestiary Tracker** adjudication for checks launched from
+  Lex's Recall Knowledge macro. The GM marks each result as a failure, success,
+  or critical success, then selects one or two facts to reveal.
+- Supports individual Fortitude, Reflex, and Will reveals using Tracker's
+  comparative save descriptions, plus individual immunities, resistances, and
+  weaknesses. Absent IWR categories can be recorded as a deliberate discovery.
+- Revealed facts persist in PF2E Bestiary Tracking, are shared party-wide, and
+  can be posted as a public Recall Knowledge chat card. Already known facts are
+  visibly marked and cannot spend another selection.
+- Warns the GM when Bestiary Tracker needs **Vague Descriptions → Saves** and
+  **Comparative Save Descriptions** enabled for qualitative save reveals.
+
 ## 0.1.9
 
 - Recall Knowledge now reliably controls the selected subject token and updates

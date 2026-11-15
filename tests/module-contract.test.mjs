@@ -9,6 +9,7 @@ test("manifest targets Foundry V14 and both supported systems", async () => {
   assert.equal(manifest.id, "hero-bonus-points");
   assert.equal(manifest.title, "Lex's Variant Rules");
   assert.equal(manifest.compatibility.minimum, "14.365");
+  assert.equal(manifest.compatibility.verified, "14.370");
   assert.deepEqual(manifest.relationships.systems.map((system) => system.id), ["pf2e", "sf2e"]);
 });
 
@@ -124,6 +125,23 @@ test("Recall Knowledge uses scene-aware v14 token targeting and the GM review qu
   assert.match(source, /game\.user\.setFlag\(MODULE_ID, RECALL_KNOWLEDGE_USER_QUEUE_FLAG/);
   assert.match(source, /Hooks\.on\("updateUser"/);
   assert.doesNotMatch(source, /game\.user\.updateTokenTargets/);
+});
+
+test("Recall Knowledge batches Bestiary Tracker reveals without exposing numeric saves", async () => {
+  const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
+  const template = await readFile(new URL("templates/recall-knowledge-queue.hbs", root), "utf8");
+  assert.match(source, /BESTIARY_TRACKER_MODULE_ID = "pf2e-bestiary-tracking"/);
+  assert.match(source, /function bestiaryTrackerReadiness/);
+  assert.match(source, /properties\?\.saves === true/);
+  assert.match(source, /settings\?\.simpleSaves === true/);
+  assert.match(source, /function saveRelativeDescription/);
+  assert.match(source, /function applyRecallKnowledgeTrackerReveals/);
+  assert.match(source, /await page\.update\(update\)/);
+  assert.match(source, /await ChatMessage\.create/);
+  assert.match(template, /Critical Success — choose 2/);
+  assert.match(template, /Post revealed facts to public chat/);
+  assert.match(template, /Already revealed/);
+  assert.doesNotMatch(template, /\+\{\{.*save.*value/i);
 });
 
 test("Careful Consumption intercepts only Toolbelt healing-consumable uses", async () => {

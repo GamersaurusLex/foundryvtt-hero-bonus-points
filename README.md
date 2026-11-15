@@ -10,6 +10,7 @@ A Foundry VTT v14 module for PF2e and SF2e that gives the GM one native award pa
 - Award one held d4, d6, d8, d10, or d12 bonus die to a PC; a new award replaces an unspent die.
 - Let an eligible player right-click their PF2e check card and choose **Add Bonus Die to Roll**.
 - Provide a scene-aware **Recall Knowledge** picker and GM review queue when run from Lex's Macro Library.
+- Batch-adjudicate successful Recall Knowledge checks into PF2E Bestiary Tracking, revealing individual saves, immunities, resistances, or weaknesses and optionally posting the approved facts to public chat.
 - Optionally enable **Careful Consumption** for healing consumables used through PF2e Toolbelt's inventory **Use** button. Players choose normal healing or maximum healing at a 2-action cost. Campaigns with a chirurgeon using Greater Field Discovery can enable its additional normal-healing roll in the same dialog.
 
 For a supported PF2e check with a DC, the bonus die is folded into the original chat card and its degree of success recalculates. The die is a Fortune effect, so it cannot be combined with a Hero Point reroll on that check.
@@ -24,6 +25,7 @@ Open **Game Settings → Lex's Variant Rules → Open Award Panel**. The panel i
 - **Dynamic Stride:** adds the two-action activity to the world Items directory when enabled.
 - **Critical Initiative:** a natural 20 applies **Critical Initiative Success** (Quickened through the end of the actor's first turn); a natural 1 applies **Critical Initiative Failure** (Off-Guard until that turn begins).
 - **Mid-Game Break Hero Points:** adds a deliberate panel button that awards one Hero Point to every party character below the cap.
+- **Bestiary Tracker Recall Knowledge:** when PF2E Bestiary Tracking is active, the GM queue can resolve a success into one revealed fact or a critical success into two. Enable Tracker's **Vague Descriptions → Saves** and **Comparative Save Descriptions** to keep player-facing save knowledge qualitative rather than numeric.
 
 Enable **Careful Consumption** from the module settings after installing the companion Gamersaurus Lex fork of PF2e Toolbelt. The Toolbelt hook preserves its normal consumption workflow when a player selects **Regular Consumption**.
 

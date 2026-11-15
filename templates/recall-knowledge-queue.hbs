@@ -1,13 +1,26 @@
 <section class="recall-knowledge-queue">
   <header class="recall-knowledge-queue-header">
     <div>
-      <h2>Player Recall Knowledge Checks</h2>
-      <p>Verify the subject and target before you resolve the pile of checks.</p>
+      <h2>Recall Knowledge Queue</h2>
+      <p>Mark each resolved check, then choose one fact for a success or two for a critical success.</p>
     </div>
     {{#if hasRequests}}
-      <button type="button" data-action="clear-requests"><i class="fa-solid fa-trash"></i> Clear Queue</button>
+      <div class="recall-knowledge-queue-header-actions">
+        {{#if tracker.active}}
+          <label class="recall-knowledge-post-chat"><input type="checkbox" data-rk-post-chat checked> Post revealed facts to public chat</label>
+        {{/if}}
+        <button type="button" data-action="clear-requests"><i class="fa-solid fa-trash"></i> Clear Queue</button>
+      </div>
     {{/if}}
   </header>
+
+  {{#if tracker.active}}
+    {{#unless tracker.ready}}
+      <p class="recall-knowledge-tracker-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{tracker.message}}</p>
+    {{/unless}}
+  {{else}}
+    <p class="recall-knowledge-tracker-warning"><i class="fa-solid fa-circle-info"></i> Bestiary Tracker is not active. This queue remains available for subject and target review.</p>
+  {{/if}}
 
   {{#if hasRequests}}
     <ol class="recall-knowledge-request-list">
@@ -19,16 +32,47 @@
             <img src="{{targetImg}}" alt="">
           </div>
           <div class="recall-knowledge-request-details">
-            <strong>{{userName}}</strong> requested Recall Knowledge as <b>{{subject.name}}</b> about <b>{{targetName}}</b>.
+            <strong>{{userName}}</strong> checked as <b>{{subject.name}}</b> about <b>{{targetName}}</b>.
             <span>{{createdAtLabel}}</span>
           </div>
           <div class="recall-knowledge-request-actions">
             <button type="button" data-action="focus-request" data-request-id="{{id}}"><i class="fa-solid fa-crosshairs"></i> Focus</button>
             <button type="button" data-action="dismiss-request" data-request-id="{{id}}" data-tooltip="Remove from queue" aria-label="Remove from queue"><i class="fa-solid fa-check"></i></button>
           </div>
+
+          {{#if ../tracker.active}}
+            <div class="recall-knowledge-tracker-controls">
+              <label>Outcome
+                <select data-rk-outcome data-request-id="{{id}}">
+                  <option value="">Still resolving</option>
+                  <option value="failure">Failure</option>
+                  <option value="success">Success — choose 1</option>
+                  <option value="criticalSuccess">Critical Success — choose 2</option>
+                </select>
+              </label>
+              {{#if trackerError}}
+                <p class="recall-knowledge-tracker-error">{{trackerError}}</p>
+              {{else}}
+                <div class="recall-knowledge-tracker-choices" aria-label="Bestiary Tracker facts for {{targetName}}">
+                  {{#each trackerChoices}}
+                    <label class="recall-knowledge-tracker-choice {{#if known}}is-known{{/if}}">
+                      <input type="checkbox" data-rk-choice data-request-id="{{../id}}" data-choice-key="{{key}}" {{#if known}}disabled{{/if}}>
+                      <span>{{label}}</span>{{#if known}}<em>Already revealed</em>{{/if}}
+                    </label>
+                  {{/each}}
+                </div>
+              {{/if}}
+            </div>
+          {{/if}}
         </li>
       {{/each}}
     </ol>
+    {{#if tracker.active}}
+      <footer class="recall-knowledge-queue-footer">
+        <p>Already revealed Tracker facts are red and cannot spend a selection. Failures clear from this queue without changing Tracker.</p>
+        <button type="button" data-action="apply-tracker-reveals"><i class="fa-solid fa-book-open-reader"></i> Apply Resolved Checks</button>
+      </footer>
+    {{/if}}
   {{else}}
     <p class="recall-knowledge-empty">No player Recall Knowledge checks are waiting. Their requests will appear here as they make them.</p>
   {{/if}}
