@@ -1,61 +1,72 @@
-<section class="hero-bonus-panel {{#unless bonusDiceEnabled}}bonus-dice-disabled{{/unless}}">
+<section class="hero-bonus-panel {{#if isMythic}}is-mythic{{else}}is-hero{{/if}}">
   <header class="award-header">
     <div>
-      <h2>Lex's Variant Rules</h2>
-      <p>Opening awards set Hero Points. Break awards add one, capped at 3. Mythic Points retain each character’s system-defined cap.</p>
-    </div>
-    <div class="award-actions">
-      <button type="button" data-action="fill-opening" data-value="1"><i class="fa-solid fa-sun"></i> Fill Selected: 1 Hero Point</button>
-      <button type="button" data-action="apply-awards"><i class="fa-solid fa-flag-checkered"></i> Apply Selected Awards</button>
-      <button type="button" data-action="award-break"><i class="fa-solid fa-mug-hot"></i> Award Break Hero Point</button>
-      {{#if midGameBreakEnabled}}<button type="button" data-action="award-mid-game-break"><i class="fa-solid fa-clock"></i> Apply Mid-Game Break Hero Points</button>{{/if}}
+      <h2>Session Awards</h2>
+      <p>{{#if isMythic}}Mythic Points start at 3. Custom awards add points without exceeding 3.{{else}}Hero Points start at 1; one MVP receives 2.{{/if}}</p>
     </div>
   </header>
 
-  <p class="award-hint">Set the MVP’s opening value to <strong>2</strong>, leave the rest at <strong>1</strong>, then apply the selected rows together. Mythic <strong>Set</strong> replaces a character’s current value; Mythic <strong>Add</strong> awards extra points after that value is set.{{#if bonusDiceEnabled}} Choose any bonus dice, or use <strong>Clear</strong> to remove one.{{/if}}</p>
+  <nav class="award-tabs" aria-label="Award functions">
+    <button type="button" data-action="switch-award-tab" data-tab="session" class="{{#if isSession}}active{{/if}}"><i class="fa-solid fa-sun"></i> Session Start</button>
+    <button type="button" data-action="switch-award-tab" data-tab="custom" class="{{#if isCustom}}active{{/if}}"><i class="fa-solid fa-plus"></i> Custom Add</button>
+    {{#if isHero}}<button type="button" data-action="switch-award-tab" data-tab="break" class="{{#if isBreak}}active{{/if}}"><i class="fa-solid fa-mug-hot"></i> Mid-Game Break</button>{{/if}}
+    {{#if bonusDiceEnabled}}<button type="button" data-action="switch-award-tab" data-tab="bonus" class="{{#if isBonus}}active{{/if}}"><i class="fa-solid fa-dice"></i> Bonus Dice</button>{{/if}}
+  </nav>
 
-  <div class="award-grid" role="table" aria-label="Party points">
-    <div class="award-row award-labels" role="row">
-      <span><input type="checkbox" data-action="toggle-all" checked aria-label="Select all party members"></span>
-      <span>Character</span><span>Hero Points</span><span>Opening Set</span><span>Mythic Points</span><span>Mythic Set</span><span>Mythic Add</span>{{#if bonusDiceEnabled}}<span>Held Bonus Die</span>{{/if}}
-    </div>
-    {{#each actors}}
-      <div class="award-row" role="row" data-actor-id="{{id}}">
-        <span><input type="checkbox" class="award-selected" checked aria-label="Select {{name}}"></span>
-        <span class="actor-name"><img src="{{img}}" alt="">{{name}}</span>
-        <span class="resource-value">{{hero.value}} / 3</span>
-        <span><input class="opening-hero" type="number" min="0" max="3" value="{{hero.value}}" aria-label="Opening Hero Points for {{name}}"></span>
-        <span class="resource-value">
-          {{#if mythic.enabled}}
-            {{mythic.value}} / {{mythic.max}}
-          {{else}}
-            <em>—</em>
-          {{/if}}
-        </span>
-        <span>
-          {{#if mythic.enabled}}
-            <input class="mythic-set" type="number" min="0" max="{{mythic.max}}" value="{{mythic.value}}" aria-label="Set Mythic Points for {{name}}">
-          {{else}}
-            <em>—</em>
-          {{/if}}
-        </span>
-        <span>
-          {{#if mythic.enabled}}
-            <input class="mythic-add" type="number" min="0" max="3" value="0" aria-label="Add Mythic Points for {{name}}">
-          {{else}}
-            <em>—</em>
-          {{/if}}
-        </span>
-        {{#if ../bonusDiceEnabled}}
-          <span>
-            <select class="bonus-die" aria-label="Bonus die for {{name}}">
-              {{#each dieOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}
-            </select>
-          </span>
-        {{/if}}
+  {{#if isSession}}
+    <section class="award-function award-session-start">
+      {{#if isHero}}
+        <div class="award-rule"><strong>Every PC receives 1 Hero Point.</strong><span>The selected MVP receives 2 instead.</span></div>
+        <label class="award-mvp-picker">MVP
+          <select name="mvpActorId" aria-label="Session MVP">
+            {{#each mvpOptions}}<option value="{{id}}">{{name}}</option>{{/each}}
+          </select>
+        </label>
+        <button type="button" class="award-primary" data-action="session-start"><i class="fa-solid fa-flag-checkered"></i> Start Hero Point Session</button>
+      {{else}}
+        <div class="award-rule"><strong>Every PC receives 3 Mythic Points.</strong><span>This replaces their current Mythic Point total.</span></div>
+        <button type="button" class="award-primary" data-action="session-start"><i class="fa-solid fa-flag-checkered"></i> Start Mythic Session</button>
+      {{/if}}
+    </section>
+  {{/if}}
+
+  {{#if isCustom}}
+    <section class="award-function award-custom-add">
+      <div class="award-add-controls">
+        <label>Add <input class="custom-add-amount" type="number" min="1" max="3" value="1" aria-label="Points to add"></label>
+        <label class="award-select-all"><input type="checkbox" data-action="toggle-custom-all" checked> All PCs</label>
       </div>
-    {{else}}
-      <p>No character members were found in the Party actor.</p>
-    {{/each}}
-  </div>
+      <div class="award-actor-chips" role="group" aria-label="Characters receiving points">
+        {{#each actors}}
+          <label class="award-actor-chip is-selected">
+            <input class="custom-add-selected" type="checkbox" value="{{id}}" checked data-name="{{name}}" data-current="{{points.value}}" data-cap="{{points.cap}}">
+            <img src="{{img}}" alt=""><span>{{name}}</span><em>{{points.value}} / {{points.cap}}</em>
+          </label>
+        {{/each}}
+      </div>
+      <p class="award-preview" data-custom-add-preview></p>
+      <button type="button" class="award-primary" data-action="custom-add"><i class="fa-solid fa-plus"></i> Commit {{#if isMythic}}Mythic{{else}}Hero{{/if}} Point Award</button>
+    </section>
+  {{/if}}
+
+  {{#if isBreak}}
+    <section class="award-function award-break">
+      <div class="award-rule"><strong>Add 1 Hero Point to every PC below 3.</strong><span>Use this for the planned mid-game break.</span></div>
+      <button type="button" class="award-primary" data-action="award-mid-game-break"><i class="fa-solid fa-mug-hot"></i> Award Mid-Game Hero Points</button>
+    </section>
+  {{/if}}
+
+  {{#if isBonus}}
+    <section class="award-function award-bonus-dice">
+      <p class="award-hint">Choose only the characters receiving a new die. <strong>Clear</strong> removes an unspent die.</p>
+      <div class="bonus-die-list">
+        {{#each actors}}
+          <label class="bonus-die-row" data-actor-id="{{id}}"><span class="actor-name"><img src="{{img}}" alt="">{{name}}</span>
+            <select class="bonus-die" aria-label="Bonus die for {{name}}">{{#each dieOptions}}<option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>{{/each}}</select>
+          </label>
+        {{/each}}
+      </div>
+      <button type="button" class="award-primary" data-action="apply-bonus-dice"><i class="fa-solid fa-dice"></i> Commit Bonus Dice</button>
+    </section>
+  {{/if}}
 </section>

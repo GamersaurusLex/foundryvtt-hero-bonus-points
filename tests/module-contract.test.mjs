@@ -15,16 +15,23 @@ test("manifest targets Foundry V14 and both supported systems", async () => {
 
 test("award panel exposes the required GM workflows", async () => {
   const source = await readFile(new URL("scripts/hero-bonus-points.js", root), "utf8");
-  for (const action of ["apply-awards", "award-break", "award-mid-game-break"]) {
+  const template = await readFile(new URL("templates/award-panel.hbs", root), "utf8");
+  for (const action of ["session-start", "custom-add", "award-mid-game-break", "apply-bonus-dice"]) {
     assert.match(source, new RegExp(`"${action}"`));
   }
   assert.match(source, /Math\.min\(maximum, Math\.max\(minimum, value\)\)/);
+  assert.match(source, /function pointMode/);
+  assert.match(source, /function pointCap/);
+  assert.match(source, /function refreshCustomAddPreview/);
   assert.match(source, /bonusDie === "clear"/);
-  assert.match(source, /mythicChanged/);
-  assert.match(source, /mythicSet/);
-  assert.match(source, /mythicAdd/);
-  assert.match(source, /Mythic Points —/);
-  assert.doesNotMatch(source, /Mythic Points:<\/strong> \$\{actor\.name\}/);
+  assert.match(source, /Session start \$\{label\}/);
+  assert.match(source, /Custom \$\{label\} award/);
+  assert.match(template, /Session Start/);
+  assert.match(template, /Custom Add/);
+  assert.match(template, /Mid-Game Break/);
+  assert.match(template, /Bonus Dice/);
+  assert.match(template, /Session MVP/);
+  assert.match(template, /All PCs/);
   assert.doesNotMatch(source, /actor\.sheet\?\.render/);
 });
 

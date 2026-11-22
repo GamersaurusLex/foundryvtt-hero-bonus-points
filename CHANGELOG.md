@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Rebuilt the GM award panel around four focused functions: **Session Start**,
+  **Custom Add**, **Mid-Game Break**, and **Bonus Dice**.
+- Session Start sets every Hero Point character to 1 and one selected MVP to 2;
+  Mythic Session Start sets every character to 3 Mythic Points.
+- Custom Add applies a chosen 1–3 point award to all or selected characters
+  without exceeding the 3-point cap. Mid-Game Break remains Hero Point-only.
+- Bonus Dice now has a dedicated tab, leaving routine point awards compact and
+  easy to confirm.
+
 ## 0.2.0
 
 - Added GM-batched **Bestiary Tracker** adjudication for checks launched from

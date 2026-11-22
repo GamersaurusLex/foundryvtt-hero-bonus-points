@@ -49,6 +49,18 @@ function mythicResource(actor) {
   return Number.isFinite(resource?.max) && resource.max > 0 ? resource : null;
 }
 
+function usesMythicPoints() {
+  return partyMembers().some((actor) => Boolean(mythicResource(actor)));
+}
+
+function pointMode() {
+  return usesMythicPoints() ? "mythic" : "hero";
+}
+
+function pointCap(actor, mode = pointMode()) {
+  return mode === "mythic" ? Math.min(3, mythicResource(actor)?.max ?? 3) : 3;
+}
+
 async function announce(content) {
   await ChatMessage.create({ speaker: { alias: game.user.name }, content, whisper: [] });
 }
@@ -66,6 +78,30 @@ async function awardMidGameBreakHeroPoints() {
   }));
   if (awarded.length) await announce(`<p><strong>Mid-game break Hero Point award:</strong> ${awarded.join(", ")} each gain 1 Hero Point.</p>`);
   if (capped.length) ui.notifications.info(`${capped.join(", ")} ${capped.length === 1 ? "is" : "are"} already at the 3-point cap.`);
+}
+
+function refreshCustomAddPreview(root) {
+  const amount = clamp(Number(root.querySelector(".custom-add-amount")?.value) || 0, 0, 3);
+  const selected = [...root.querySelectorAll(".custom-add-selected")];
+  const selectedCount = selected.filter((input) => input.checked).length;
+  const selectAll = root.querySelector("[data-action=toggle-custom-all]");
+  if (selectAll) {
+    selectAll.checked = selectedCount === selected.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < selected.length;
+  }
+  const names = [];
+  for (const input of selected) {
+    const chip = input.closest(".award-actor-chip");
+    const current = Number(input.dataset.current) || 0;
+    const cap = Number(input.dataset.cap) || 3;
+    const next = clamp(current + amount, 0, cap);
+    chip?.classList.toggle("is-selected", input.checked);
+    if (input.checked) names.push(`${input.dataset.name} ${current} → ${next}`);
+  }
+  const preview = root.querySelector("[data-custom-add-preview]");
+  if (preview) preview.textContent = names.length
+    ? `Will add ${amount}: ${names.join(", ")}.`
+    : "Select at least one character to preview this award.";
 }
 
 function carefulConsumptionEnabled() {
@@ -586,22 +622,25 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
   static DEFAULT_OPTIONS = {
     id: `${MODULE_ID}-award-panel`,
     classes: [MODULE_ID],
-    position: { width: 1000, height: 620 },
+    position: { width: 780, height: 500 },
     window: { title: "Lex's Variant Rules", icon: "fa-solid fa-sliders", resizable: true },
     actions: {
-      "toggle-all": AwardPanel.#toggleAll,
-      "fill-opening": AwardPanel.#fillOpening,
-      "apply-awards": AwardPanel.#applyAwards,
-      "award-break": AwardPanel.#awardBreak,
+      "switch-award-tab": AwardPanel.#switchAwardTab,
+      "session-start": AwardPanel.#sessionStart,
+      "toggle-custom-all": AwardPanel.#toggleCustomAll,
+      "custom-add": AwardPanel.#customAdd,
+      "apply-bonus-dice": AwardPanel.#applyBonusDice,
       "award-mid-game-break": AwardPanel.#awardMidGameBreak
     }
   };
 
-  static PARTS = { panel: { template: `modules/${MODULE_ID}/templates/award-panel.hbs`, root: true, scrollable: [".award-grid"] } };
+  static PARTS = { panel: { template: `modules/${MODULE_ID}/templates/award-panel.hbs`, root: true } };
 
   get title() { return "Lex's Variant Rules"; }
 
   async _prepareContext(options) {
+    const mode = pointMode();
+    const activeTab = this.activeTab ?? "session";
     const actors = partyMembers().map((actor) => {
       const hero = actor.system.resources?.heroPoints ?? { value: 0 };
       const mythic = mythicResource(actor);
@@ -616,101 +655,111 @@ class AwardPanel extends HandlebarsApplicationMixin(ApplicationV2) {
           ...DIE_SIZES.map((value) => ({ value, label: `d${value}`, selected: value === heldDie(actor) }))
         ],
         hero: { value: clamp(Number(hero.value) || 0, 0, 3) },
-        mythic: { enabled: !!mythic, value: mythic?.value ?? 0, max: mythic?.max ?? 0 }
+        mythic: { enabled: !!mythic, value: mythic?.value ?? 0, max: Math.min(3, mythic?.max ?? 3) },
+        points: { value: mode === "mythic" ? mythic?.value ?? 0 : clamp(Number(hero.value) || 0, 0, 3), cap: pointCap(actor, mode) }
       };
     });
     return {
       ...await super._prepareContext(options),
       actors,
-      dieSizes: DIE_SIZES,
+      mode,
+      isHero: mode === "hero",
+      isMythic: mode === "mythic",
+      isSession: activeTab === "session",
+      isCustom: activeTab === "custom",
+      isBreak: activeTab === "break",
+      isBonus: activeTab === "bonus",
+      mvpOptions: actors,
       bonusDiceEnabled: bonusDiceEnabled(),
       midGameBreakEnabled: game.settings.get(MODULE_ID, "midGameBreakHeroPoints")
     };
   }
 
-  selectedRows() {
-    return [...this.element.querySelectorAll(".award-row[data-actor-id]")]
-      .filter((row) => row.querySelector(".award-selected")?.checked);
+  _onRender(context, options) {
+    super._onRender(context, options);
+    const root = this.element;
+    const refresh = () => refreshCustomAddPreview(root);
+    root.querySelector(".custom-add-amount")?.addEventListener("input", refresh);
+    root.querySelectorAll(".custom-add-selected").forEach((input) => input.addEventListener("change", refresh));
+    refresh();
   }
 
-  static #toggleAll(event, target) {
-    this.element.querySelectorAll(".award-selected").forEach((input) => { input.checked = target.checked; });
+  customActors() {
+    return [...this.element.querySelectorAll(".custom-add-selected:checked")]
+      .map((input) => game.actors.get(input.value))
+      .filter(Boolean);
   }
 
-  static #fillOpening(event, target) {
-    const value = clamp(Number(target.dataset.value) || 0, 0, 3);
-    this.selectedRows().forEach((row) => { row.querySelector(".opening-hero").value = value; });
-  }
-
-  static async #applyAwards() {
-    const updates = this.selectedRows().map((row) => {
-      const actor = game.actors.get(row.dataset.actorId);
-      const heroPoints = clamp(Number(row.querySelector(".opening-hero")?.value) || 0, 0, 3);
-      const bonusDie = bonusDiceEnabled() ? (row.querySelector(".bonus-die")?.value ?? "") : "";
-      const mythic = mythicResource(actor);
-      const mythicSet = mythic
-        ? clamp(Number(row.querySelector(".mythic-set")?.value) || 0, 0, mythic.max)
-        : null;
-      const mythicAdd = mythic
-        ? clamp(Number(row.querySelector(".mythic-add")?.value) || 0, 0, 3)
-        : 0;
-      return actor ? { actor, heroPoints, bonusDie, mythic, mythicSet, mythicAdd } : null;
-    }).filter(Boolean);
-    if (!updates.length) return ui.notifications.warn("Select at least one character.");
-    const applied = await Promise.all(updates.map(async ({ actor, heroPoints, bonusDie, mythic, mythicSet, mythicAdd }) => {
-      const currentHeroPoints = Number(actor.system.resources?.heroPoints?.value) || 0;
-      const currentDie = heldDie(actor);
-      const heroChanged = currentHeroPoints !== heroPoints;
-      const mythicPoints = mythic ? clamp(mythicSet + mythicAdd, 0, mythic.max) : null;
-      const mythicChanged = Boolean(mythic) && Number(mythic.value) !== mythicPoints;
-      const dieChanged = bonusDiceEnabled() && (
-        (bonusDie === "clear" && Boolean(currentDie))
-        || (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie))
-      );
-      const resourceUpdate = {};
-      if (heroChanged) resourceUpdate["system.resources.heroPoints.value"] = heroPoints;
-      if (mythicChanged) resourceUpdate["system.resources.mythicPoints.value"] = mythicPoints;
-      if (Object.keys(resourceUpdate).length) await actor.update(resourceUpdate);
-      if (bonusDie === "clear" && currentDie) await actor.unsetFlag(MODULE_ID, "bonusDie");
-      else if (DIE_SIZES.includes(Number(bonusDie)) && currentDie !== Number(bonusDie)) await actor.setFlag(MODULE_ID, "bonusDie", Number(bonusDie));
-      return { actor, heroPoints, bonusDie, heroChanged, mythicChanged, mythicPoints, mythic, mythicSet, mythicAdd, dieChanged };
-    }));
-    const changed = applied.filter((award) => award.heroChanged || award.mythicChanged || award.dieChanged);
-    if (!changed.length) return ui.notifications.info("No selected awards changed.");
-    const heroSummary = applied.filter(({ heroChanged }) => heroChanged)
-      .map(({ actor, heroPoints }) => `${actor.name} (${heroPoints})`).join(", ");
-    const dieSummary = applied.filter(({ dieChanged, bonusDie }) => dieChanged && bonusDie && bonusDie !== "clear")
-      .map(({ actor, bonusDie }) => `${actor.name} (d${bonusDie})`).join(", ");
-    const cleared = applied.filter(({ dieChanged, bonusDie }) => dieChanged && bonusDie === "clear")
-      .map(({ actor }) => actor.name).join(", ");
-    const mythicSummary = applied.filter(({ mythicChanged }) => mythicChanged)
-      .map(({ actor, mythicPoints, mythic, mythicSet, mythicAdd }) => {
-        const operation = mythicAdd > 0 ? `set ${mythicSet}, add ${mythicAdd}` : `set ${mythicSet}`;
-        return `${actor.name} (${operation}; ${mythicPoints} / ${mythic.max})`;
-      }).join(", ");
-    const summaries = [
-      heroSummary && `Hero Points — ${heroSummary}.`,
-      mythicSummary && `Mythic Points — ${mythicSummary}.`,
-      dieSummary && `Bonus dice — ${dieSummary}.`,
-      cleared && `Bonus dice cleared — ${cleared}.`,
-    ].filter(Boolean);
-    await announce(`<p><strong>Session awards applied:</strong> ${summaries.join(" ")}</p>`);
+  static #switchAwardTab(event, target) {
+    this.activeTab = target.dataset.tab;
     this.render({ force: true });
   }
 
-  static async #awardBreak() {
-    const actors = this.selectedRows().map((row) => game.actors.get(row.dataset.actorId)).filter(Boolean);
+  static async #sessionStart() {
+    const mode = pointMode();
+    const mvpId = this.element.querySelector("[name=mvpActorId]")?.value ?? "";
+    const actors = partyMembers();
+    if (!actors.length) return ui.notifications.warn("No party characters were found.");
+    const changed = [];
+    for (const actor of actors) {
+      const value = mode === "mythic" ? pointCap(actor, mode) : actor.id === mvpId ? 2 : 1;
+      const path = mode === "mythic" ? "system.resources.mythicPoints.value" : "system.resources.heroPoints.value";
+      const current = mode === "mythic"
+        ? Number(mythicResource(actor)?.value) || 0
+        : Number(actor.system.resources?.heroPoints?.value) || 0;
+      if (current === value) continue;
+      await actor.update({ [path]: value });
+      changed.push(`${actor.name} (${value})`);
+    }
+    const label = mode === "mythic" ? "Mythic Points" : "Hero Points";
+    const mvp = mode === "hero" && mvpId ? game.actors.get(mvpId)?.name : null;
+    await announce(`<p><strong>Session start ${label}:</strong> ${mode === "mythic" ? `all party characters set to 3${changed.length ? ` — ${changed.join(", ")}` : ""}` : `${mvp ? `${mvp} receives 2 as MVP; ` : ""}all other party characters set to 1${changed.length ? ` — ${changed.join(", ")}` : ""}`}.`);
+    this.render({ force: true });
+  }
+
+  static #toggleCustomAll(event, target) {
+    this.element.querySelectorAll(".custom-add-selected").forEach((input) => { input.checked = target.checked; });
+    refreshCustomAddPreview(this.element);
+  }
+
+  static async #customAdd() {
+    const mode = pointMode();
+    const actors = this.customActors();
     if (!actors.length) return ui.notifications.warn("Select at least one character.");
+    const amount = clamp(Number(this.element.querySelector(".custom-add-amount")?.value) || 0, 0, 3);
+    if (!amount) return ui.notifications.warn("Choose how many points to add.");
     const awarded = [];
     const capped = [];
-    await Promise.all(actors.map(async (actor) => {
-      const current = Number(actor.system.resources?.heroPoints?.value) || 0;
-      if (current >= 3) return capped.push(actor.name);
-      await actor.update({ "system.resources.heroPoints.value": current + 1 });
-      awarded.push(actor.name);
-    }));
-    if (awarded.length) await announce(`<p><strong>Mid-session Hero Point award:</strong> ${awarded.join(", ")} each gain 1 Hero Point.</p>`);
+    for (const actor of actors) {
+      const cap = pointCap(actor, mode);
+      const current = mode === "mythic"
+        ? Number(mythicResource(actor)?.value) || 0
+        : Number(actor.system.resources?.heroPoints?.value) || 0;
+      const value = clamp(current + amount, 0, cap);
+      if (value === current) { capped.push(actor.name); continue; }
+      const path = mode === "mythic" ? "system.resources.mythicPoints.value" : "system.resources.heroPoints.value";
+      await actor.update({ [path]: value });
+      awarded.push(`${actor.name} (${current} → ${value})`);
+    }
+    const label = mode === "mythic" ? "Mythic Points" : "Hero Points";
+    if (awarded.length) await announce(`<p><strong>Custom ${label} award:</strong> ${awarded.join(", ")}.</p>`);
     if (capped.length) ui.notifications.info(`${capped.join(", ")} ${capped.length === 1 ? "is" : "are"} already at the 3-point cap.`);
+    this.render({ force: true });
+  }
+
+  static async #applyBonusDice() {
+    const changed = [];
+    for (const row of this.element.querySelectorAll(".bonus-die-row")) {
+      const actor = game.actors.get(row.dataset.actorId);
+      const bonusDie = row.querySelector(".bonus-die")?.value ?? "";
+      const currentDie = heldDie(actor);
+      if (!actor || !bonusDie || (bonusDie === "clear" && !currentDie) || (DIE_SIZES.includes(Number(bonusDie)) && currentDie === Number(bonusDie))) continue;
+      if (bonusDie === "clear") await actor.unsetFlag(MODULE_ID, "bonusDie");
+      else if (DIE_SIZES.includes(Number(bonusDie))) await actor.setFlag(MODULE_ID, "bonusDie", Number(bonusDie));
+      changed.push(bonusDie === "clear" ? `${actor.name} (cleared)` : `${actor.name} (d${bonusDie})`);
+    }
+    if (!changed.length) return ui.notifications.info("No bonus dice changed.");
+    await announce(`<p><strong>Bonus dice:</strong> ${changed.join(", ")}.</p>`);
     this.render({ force: true });
   }
 
